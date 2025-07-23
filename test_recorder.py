@@ -6,8 +6,7 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 import time
-from bs4 import BeautifulSoup
-from element_splitter import simplify_html
+from element_simplifier import simplify_html
 
 class TestRecorder:
     def __init__(self):
