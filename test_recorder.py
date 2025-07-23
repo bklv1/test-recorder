@@ -6,6 +6,8 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 import time
+from bs4 import BeautifulSoup
+from element_splitter import simplify_html
 
 class TestRecorder:
     def __init__(self):
@@ -114,7 +116,7 @@ class TestRecorder:
             if elements:
                 print(f"Page URL: {page_url}")
                 for element_html in elements:
-                    print(f" - {element_html}")
+                    print(f" - {simplify_html(element_html)}")
 
     def clean_up(self):
         try:
