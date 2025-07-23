@@ -10,7 +10,8 @@ import time
 class TestRecorder:
     def __init__(self):
         chrome_options = Options()
-        # Add any options if needed
+        chrome_options.add_argument("--start-maximized")  
+
         self.driver = webdriver.Chrome(service=Service(), options=chrome_options)
         self.wait = WebDriverWait(self.driver, 10)
         self.page_clicks_map = {}
@@ -56,10 +57,13 @@ class TestRecorder:
         self.record_hovered_element()
 
     def record_clicked_element(self):
-        clicked_element_html = self.driver.execute_script("return window.clickedElementHtml;")
-        if clicked_element_html and clicked_element_html not in self.page_clicks_map[self.current_url]:
-            self.page_clicks_map[self.current_url].append(clicked_element_html)
-            print(f"Clicked Element: {clicked_element_html}")
+        clicked_elements = self.driver.execute_script("return JSON.parse(localStorage.clickedElements || '[]')")
+        for clicked_element_html in clicked_elements:
+            if clicked_element_html not in self.page_clicks_map[self.current_url]:
+                self.page_clicks_map[self.current_url].append(clicked_element_html)
+                print(f"Clicked Element: {clicked_element_html}")
+        # Clear after reading
+        self.driver.execute_script("localStorage.clickedElements = JSON.stringify([])")
 
     def record_hovered_element(self):
         hovered_element_html = self.driver.execute_script("return window.hoveredElementHtml;")
@@ -69,22 +73,29 @@ class TestRecorder:
 
     def inject_listeners(self):
         script = """
-        var hoverTimeout;
-        document.addEventListener('click', function(event) {
-            var element = event.target;
-            window.clickedElementHtml = element.outerHTML;
-            console.log('Element clicked: ' + window.clickedElementHtml);
-        }, true);
-        document.addEventListener('mouseover', function(event) {
-            var element = event.target;
-            hoverTimeout = setTimeout(function() {
-                window.hoveredElementHtml = element.outerHTML;
-                console.log('Element hovered for 5 seconds: ' + window.hoveredElementHtml);
-            }, 5000);
-        }, true);
-        document.addEventListener('mouseout', function(event) {
-            clearTimeout(hoverTimeout);
-        }, true);
+        if (!window.__testRecorderInjected) {
+            window.__testRecorderInjected = true;
+            var hoverTimeout;
+            // Initialize localStorage if not present
+            if (!localStorage.clickedElements) localStorage.clickedElements = JSON.stringify([]);
+            document.addEventListener('click', function(event) {
+                var element = event.target;
+                var arr = JSON.parse(localStorage.clickedElements);
+                arr.push(element.outerHTML);
+                localStorage.clickedElements = JSON.stringify(arr);
+            }, true);
+            document.addEventListener('mouseover', function(event) {
+                var element = event.target;
+                hoverTimeout = setTimeout(function() {
+                    window.hoveredElementHtml = element.outerHTML;
+                    if (!window.hoveredElements) window.hoveredElements = [];
+                    window.hoveredElements.push(element.outerHTML);
+                }, 5000);
+            }, true);
+            document.addEventListener('mouseout', function(event) {
+                clearTimeout(hoverTimeout);
+            }, true);
+        }
         """
         self.driver.execute_script(script)
 
