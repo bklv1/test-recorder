@@ -63,6 +63,8 @@ class TestRecorder:
 
     def record_clicked_element(self):
         clicked_elements = self.driver.execute_script("return JSON.parse(localStorage.clickedElements || '[]')")
+        if clicked_elements is None:
+            clicked_elements = []
         for clicked in clicked_elements:
             # clicked is now an object: {html, url}
             page_url = clicked.get("url", self.current_url)
