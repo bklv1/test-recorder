@@ -18,6 +18,7 @@ class TestRecorder:
         self.page_clicks_map = {}
         self.page_hovers_map = {}
         self.page_inputs_map = {}
+        self.page_events_map = {}  # New: unified event list per page
         self.current_url = ""
 
     def run(self):
@@ -34,6 +35,7 @@ class TestRecorder:
         self.page_clicks_map[self.current_url] = []
         self.page_hovers_map[self.current_url] = []
         self.page_inputs_map[self.current_url] = []
+        self.page_events_map[self.current_url] = []  # New: initialize unified event list
         self.inject_listeners()
 
     def monitor_user_interactions(self):
@@ -55,6 +57,7 @@ class TestRecorder:
             self.page_clicks_map.setdefault(self.current_url, [])
             self.page_hovers_map.setdefault(self.current_url, [])
             self.page_inputs_map.setdefault(self.current_url, [])
+            self.page_events_map.setdefault(self.current_url, [])  # New: ensure unified event list
 
     def record_interactions(self):
         self.record_clicked_element()
@@ -74,6 +77,14 @@ class TestRecorder:
             if html not in self.page_clicks_map[page_url]:
                 self.page_clicks_map[page_url].append(html)
                 print(f"Clicked Element: {html} (URL: {page_url})")
+            # --- Unified event list ---
+            if page_url not in self.page_events_map:
+                self.page_events_map[page_url] = []
+            self.page_events_map[page_url].append({
+                "type": "click",
+                "html": html,
+                "value": None
+            })
         # Clear after reading
         self.driver.execute_script("localStorage.clickedElements = JSON.stringify([])")
 
@@ -142,6 +153,14 @@ class TestRecorder:
             if not already_recorded:
                 self.page_inputs_map[self.current_url].append(event)
                 print(f"Input Event: keys sent: {event.get('value', '')}; html element:{event.get('html', '')}")
+            # --- Unified event list ---
+            if self.current_url not in self.page_events_map:
+                self.page_events_map[self.current_url] = []
+            self.page_events_map[self.current_url].append({
+                "type": "input",
+                "html": event.get("html", ""),
+                "value": event.get("value", "")
+            })
         # Clear after reading
         self.driver.execute_script("localStorage.inputEvents = JSON.stringify([])")
 
@@ -155,108 +174,35 @@ class TestRecorder:
         for page_url, elements in elements_map.items():
             if elements:
                 print(f"Page URL: {page_url}")
-                for element_html in elements:
-                    print(f" - {simplify_html(element_html)}")
+                for idx, element_html in enumerate(elements, 1):
+                    print(f"{idx}. {simplify_html(element_html)}")
 
     def print_combined_elements(self, header, clicks_map, inputs_map):
         print(header)
-        for page_url in set(list(clicks_map.keys()) + list(inputs_map.keys())):
-            clicked_elements = clicks_map.get(page_url, [])
-            input_events = inputs_map.get(page_url, [])
-            if not clicked_elements and not input_events:
+        # Use the unified event list for true chronological order
+        for page_url, events in self.page_events_map.items():
+            if not events:
                 continue
             print(f"Page URL: {page_url}")
-
-            # Build a timeline of events: (type, simplified_html, value, original_html)
-            timeline = []
-            # Add all input events with their index in the original list
-            for idx, event in enumerate(input_events):
-                html = simplify_html(event.get("html", ""))
-                value = event.get("value", "")
-                timeline.append({
-                    "type": "input",
-                    "html": html,
-                    "value": value,
-                    "original_html": event.get("html", ""),
-                    "idx": idx
-                })
-            # Add all click events with their index in the original list
-            for idx, element_html in enumerate(clicked_elements):
-                html = simplify_html(element_html)
-                timeline.append({
-                    "type": "click",
-                    "html": html,
-                    "value": None,
-                    "original_html": element_html,
-                    "idx": idx
-                })
-            # Sort timeline by the order of occurrence in the browser (inputs and clicks are interleaved)
-            # Since we can't get the true interleaved order from two separate lists, we will assume that
-            # input_events and clicked_elements are appended in the order they happened (if not, this needs browser-side fix)
-            # So we merge them by their order of appearance in the lists, using a stable sort by idx and type
-            # To preserve the order, we can reconstruct a merged list by walking through both lists in order
-            merged = []
-            i, j = 0, 0
-            total_inputs = len(input_events)
-            total_clicks = len(clicked_elements)
-            # We need to reconstruct the order: assume that the print order in the browser is input, click, input, click, etc.
-            # But since we don't have timestamps, we will just append all input events, then all click events, as before.
-            # To improve, we can add a timestamp in the browser-side event capture in the future.
-            # For now, let's merge by the order in which they appear in the lists, assuming that's the order of occurrence.
-            # But to fix the user's issue, we need to only print the last value for each input at its last occurrence.
-            # So, for each input, only print the last occurrence in the timeline.
-
-            # Build a combined list of (event_type, html, value, original_html, idx, source)
-            combined = []
-            input_idx, click_idx = 0, 0
-            while input_idx < total_inputs or click_idx < total_clicks:
-                # If both have events left, pick the one with the lower idx
-                if input_idx < total_inputs and (click_idx >= total_clicks or input_idx <= click_idx):
-                    event = input_events[input_idx]
-                    html = simplify_html(event.get("html", ""))
-                    value = event.get("value", "")
-                    combined.append({
-                        "type": "input",
-                        "html": html,
-                        "value": value,
-                        "original_html": event.get("html", ""),
-                        "idx": input_idx
-                    })
-                    input_idx += 1
-                elif click_idx < total_clicks:
-                    element_html = clicked_elements[click_idx]
-                    html = simplify_html(element_html)
-                    combined.append({
-                        "type": "click",
-                        "html": html,
-                        "value": None,
-                        "original_html": element_html,
-                        "idx": click_idx
-                    })
-                    click_idx += 1
-
-            # Find the last value for each input html
-            last_input_value = {}
-            for event in combined:
-                if event["type"] == "input":
-                    last_input_value[event["html"]] = event["value"]
-            # Find the last occurrence index for each input html
+            # Find the last index for each input html
             last_input_idx = {}
-            for idx, event in enumerate(combined):
+            for idx, event in enumerate(events):
                 if event["type"] == "input":
-                    last_input_idx[event["html"]] = idx
-
-            # Print timeline, but for input events, only print at the last occurrence
-            for idx, event in enumerate(combined):
+                    html = simplify_html(event["html"])
+                    last_input_idx[html] = idx
+            number = 1
+            for idx, event in enumerate(events):
                 if event["type"] == "input":
-                    html = event["html"]
+                    html = simplify_html(event["html"])
+                    value = event["value"]
+                    # Only print the last occurrence for each input html
                     if last_input_idx[html] == idx:
-                        value = last_input_value[html]
-                        print(f" - keys sent: {value}; html element:{html}")
+                        print(f"{number}. keys sent: {value}; html element:{html}")
+                        number += 1
                 elif event["type"] == "click":
-                    # Only print if this click is not an input element (avoid duplicate input fields)
-                    if event["html"] not in last_input_value:
-                        print(f" - {event['html']}")
+                    html = simplify_html(event["html"])
+                    print(f"{number}. {html}")
+                    number += 1
 
     def clean_up(self):
         try:
