@@ -10,96 +10,120 @@ from element_simplifier import simplify_html
 
 class TestRecorder:
     def __init__(self):
-        chrome_options = Options()
-        chrome_options.add_argument("--start-maximized")  
-
-        self.driver = webdriver.Chrome(service=Service(), options=chrome_options)
+        self.driver = self._init_driver()
         self.wait = WebDriverWait(self.driver, 10)
         self.page_clicks_map = {}
         self.page_hovers_map = {}
         self.page_inputs_map = {}
-        self.page_events_map = {}  # New: unified event list per page
+        self.page_events_map = {}
         self.current_url = ""
+
+    def _init_driver(self):
+        chrome_options = Options()
+        chrome_options.add_argument("--start-maximized")
+        return webdriver.Chrome(service=Service(), options=chrome_options)
 
     def run(self):
         try:
-            self.setup_shutdown_hook()
-            self.open_initial_page("https://opensource-demo.orangehrmlive.com/")
-            self.monitor_user_interactions()
+            self._register_shutdown_hook()
+            self._open_initial_page("https://opensource-demo.orangehrmlive.com/")
+            self._monitor_user_interactions()
         finally:
-            self.clean_up()
+            self._clean_up()
 
-    def open_initial_page(self, url):
+    def _open_initial_page(self, url):
         self.driver.get(url)
         self.current_url = self.driver.current_url
-        self.page_clicks_map[self.current_url] = []
-        self.page_hovers_map[self.current_url] = []
-        self.page_inputs_map[self.current_url] = []
-        self.page_events_map[self.current_url] = []  # New: initialize unified event list
-        self.inject_listeners()
+        self._initialize_page_maps(self.current_url)
+        self._inject_event_listeners()
 
-    def monitor_user_interactions(self):
-        browser_open = True
-
-        while browser_open:
+    def _monitor_user_interactions(self):
+        while True:
             try:
-                self.handle_url_change()
-                self.record_interactions()
+                self._handle_url_change()
+                self._record_all_interactions()
                 time.sleep(1)
             except WebDriverException:
-                browser_open = False
+                break
 
-    def handle_url_change(self):
+    def _handle_url_change(self):
         if self.current_url != self.driver.current_url:
             self.current_url = self.driver.current_url
             self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            self.inject_listeners()
-            self.page_clicks_map.setdefault(self.current_url, [])
-            self.page_hovers_map.setdefault(self.current_url, [])
-            self.page_inputs_map.setdefault(self.current_url, [])
-            self.page_events_map.setdefault(self.current_url, [])  # New: ensure unified event list
+            self._inject_event_listeners()
+            self._initialize_page_maps(self.current_url)
 
-    def record_interactions(self):
-        self.record_clicked_element()
-        self.record_hovered_element()
-        self.record_input_event()
+    def _initialize_page_maps(self, url):
+        self.page_clicks_map.setdefault(url, [])
+        self.page_hovers_map.setdefault(url, [])
+        self.page_inputs_map.setdefault(url, [])
+        self.page_events_map.setdefault(url, [])
 
-    def record_clicked_element(self):
-        clicked_elements = self.driver.execute_script("return JSON.parse(localStorage.clickedElements || '[]')")
-        if clicked_elements is None:
-            clicked_elements = []
+    def _record_all_interactions(self):
+        self._record_click_events()
+        self._record_hover_events()
+        self._record_input_events()
+
+    def _record_click_events(self):
+        clicked_elements = self._get_js_array("localStorage.clickedElements")
         for clicked in clicked_elements:
-            # clicked is now an object: {html, url}
             page_url = clicked.get("url", self.current_url)
             html = clicked.get("html", "")
-            if page_url not in self.page_clicks_map:
-                self.page_clicks_map[page_url] = []
-            if html not in self.page_clicks_map[page_url]:
-                self.page_clicks_map[page_url].append(html)
-                print(f"Clicked Element: {html} (URL: {page_url})")
-            # --- Unified event list ---
-            if page_url not in self.page_events_map:
-                self.page_events_map[page_url] = []
-            self.page_events_map[page_url].append({
-                "type": "click",
-                "html": html,
-                "value": None
-            })
-        # Clear after reading
-        self.driver.execute_script("localStorage.clickedElements = JSON.stringify([])")
+            self._append_unique(self.page_clicks_map, page_url, html)
+            self._append_event(page_url, "click", html)
+        self._clear_js_array("localStorage.clickedElements")
 
-    def record_hovered_element(self):
-        hovered_element_html = self.driver.execute_script("return window.hoveredElementHtml;")
-        if hovered_element_html and hovered_element_html not in self.page_hovers_map[self.current_url]:
-            self.page_hovers_map[self.current_url].append(hovered_element_html)
-            print(f"Hovered Element: {hovered_element_html}")
+    def _record_hover_events(self):
+        hovered_html = self.driver.execute_script("return window.hoveredElementHtml;")
+        if hovered_html and hovered_html not in self.page_hovers_map[self.current_url]:
+            self.page_hovers_map[self.current_url].append(hovered_html)
+            print(f"Hovered Element: {hovered_html}")
 
-    def inject_listeners(self):
-        script = """
+    def _record_input_events(self):
+        input_events = self._get_js_array("localStorage.inputEvents")
+        for event in input_events:
+            value = event.get("value", "")
+            html = event.get("html", "")
+            if not self._is_input_already_recorded(self.current_url, value, html):
+                self.page_inputs_map[self.current_url].append(event)
+                print(f"Input Event: keys sent: {value}; html element:{html}")
+            self._append_event(self.current_url, "input", html, value)
+        self._clear_js_array("localStorage.inputEvents")
+
+    def _get_js_array(self, storage_key):
+        result = self.driver.execute_script(f"return JSON.parse({storage_key} || '[]')")
+        return result if result is not None else []
+
+    def _clear_js_array(self, storage_key):
+        self.driver.execute_script(f"{storage_key} = JSON.stringify([])")
+
+    def _append_unique(self, mapping, key, value):
+        if key not in mapping:
+            mapping[key] = []
+        if value not in mapping[key]:
+            mapping[key].append(value)
+            print(f"Clicked Element: {value} (URL: {key})")
+
+    def _is_input_already_recorded(self, url, value, html):
+        return any(
+            e.get("value", "") == value and e.get("html", "") == html
+            for e in self.page_inputs_map[url]
+        )
+
+    def _append_event(self, url, event_type, html, value=None):
+        if url not in self.page_events_map:
+            self.page_events_map[url] = []
+        event = {"type": event_type, "html": html, "value": value}
+        self.page_events_map[url].append(event)
+
+    def _inject_event_listeners(self):
+        self.driver.execute_script(self._get_event_listener_script())
+
+    def _get_event_listener_script(self):
+        return """
         if (!window.__testRecorderInjected) {
             window.__testRecorderInjected = true;
             var hoverTimeout;
-            // Initialize localStorage if not present
             if (!localStorage.clickedElements) localStorage.clickedElements = JSON.stringify([]);
             if (!localStorage.inputEvents) localStorage.inputEvents = JSON.stringify([]);
             document.addEventListener('click', function(event) {
@@ -135,76 +159,60 @@ class TestRecorder:
             }, true);
         }
         """
-        self.driver.execute_script(script)
 
-    def setup_shutdown_hook(self):
+    def _register_shutdown_hook(self):
         import atexit
-        atexit.register(self.print_recorded_elements)
+        atexit.register(self._print_recorded_elements)
 
-    def record_input_event(self):
-        input_events = self.driver.execute_script("return JSON.parse(localStorage.inputEvents || '[]')")
-        for event in input_events:
-            # Use tuple (value, html) for uniqueness
-            key = (event.get("value", ""), event.get("html", ""))
-            already_recorded = any(
-                e.get("value", "") == event.get("value", "") and e.get("html", "") == event.get("html", "")
-                for e in self.page_inputs_map[self.current_url]
-            )
-            if not already_recorded:
-                self.page_inputs_map[self.current_url].append(event)
-                print(f"Input Event: keys sent: {event.get('value', '')}; html element:{event.get('html', '')}")
-            # --- Unified event list ---
-            if self.current_url not in self.page_events_map:
-                self.page_events_map[self.current_url] = []
-            self.page_events_map[self.current_url].append({
-                "type": "input",
-                "html": event.get("html", ""),
-                "value": event.get("value", "")
-            })
-        # Clear after reading
-        self.driver.execute_script("localStorage.inputEvents = JSON.stringify([])")
-
-    def print_recorded_elements(self):
+    def _print_recorded_elements(self):
         print("Shutdown hook triggered. Printing recorded elements...")
-        self.print_combined_elements("All Clicked Elements by Page:", self.page_clicks_map, self.page_inputs_map)
-        self.print_elements("All Hovered Elements by Page:", self.page_hovers_map)
+        self._print_combined_events("All Clicked Elements by Page:")
+        self._print_hovered_elements("All Hovered Elements by Page:")
 
-    def print_elements(self, header, elements_map):
+    def _print_hovered_elements(self, header):
         print(header)
-        for page_url, elements in elements_map.items():
+        for page_url, elements in self.page_hovers_map.items():
             if elements:
                 print(f"Page URL: {page_url}")
                 for idx, element_html in enumerate(elements, 1):
                     print(f"{idx}. {simplify_html(element_html)}")
 
-    def print_combined_elements(self, header, clicks_map, inputs_map):
+    def _print_combined_events(self, header):
         print(header)
-        # Use the unified event list for true chronological order
         for page_url, events in self.page_events_map.items():
             if not events:
                 continue
             print(f"Page URL: {page_url}")
-            # Find the last index for each input html
-            last_input_idx = {}
-            for idx, event in enumerate(events):
-                if event["type"] == "input":
-                    html = simplify_html(event["html"])
-                    last_input_idx[html] = idx
             number = 1
-            for idx, event in enumerate(events):
+            n = len(events)
+            idx = 0
+            while idx < n:
+                event = events[idx]
+                html = simplify_html(event["html"])
+                # Look ahead to see if the next event is for the same html
+                next_idx = idx + 1
+                while next_idx < n and simplify_html(events[next_idx]["html"]) == html:
+                    idx = next_idx
+                    event = events[idx]
+                    next_idx += 1
+                # Print only the last event in the consecutive run
                 if event["type"] == "input":
-                    html = simplify_html(event["html"])
                     value = event["value"]
-                    # Only print the last occurrence for each input html
-                    if last_input_idx[html] == idx:
-                        print(f"{number}. keys sent: {value}; html element:{html}")
-                        number += 1
+                    print(f"{number}. keys sent: {value}; html element:{html}")
                 elif event["type"] == "click":
-                    html = simplify_html(event["html"])
                     print(f"{number}. {html}")
-                    number += 1
+                number += 1
+                idx += 1
 
-    def clean_up(self):
+    def _get_last_input_indices(self, events):
+        last_input_idx = {}
+        for idx, event in enumerate(events):
+            if event["type"] == "input":
+                html = simplify_html(event["html"])
+                last_input_idx[html] = idx
+        return last_input_idx
+
+    def _clean_up(self):
         try:
             self.driver.quit()
         except WebDriverException:
