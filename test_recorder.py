@@ -1,3 +1,4 @@
+import json
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -26,10 +27,24 @@ class TestRecorder:
     def run(self):
         try:
             self._register_shutdown_hook()
-            self._open_initial_page("https://opensource-demo.orangehrmlive.com/")
+            base_url = self._get_base_url_from_config()
+            self._open_initial_page(base_url)
             self._monitor_user_interactions()
         finally:
             self._clean_up()
+
+    def _get_base_url_from_config(self):
+        try:
+            with open("config.json", "r", encoding="utf-8") as f:
+                config = json.load(f)
+            url = config["base_url"]
+            if not url:
+                raise ValueError("The 'base_url' in config.json is empty.")
+            return url
+        except FileNotFoundError:
+            raise RuntimeError("config.json not found. Please create it with an 'base_url' key.")
+        except KeyError:
+            raise RuntimeError("The 'base_url' key is missing in config.json.")
 
     def _open_initial_page(self, url):
         self.driver.get(url)
