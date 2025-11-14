@@ -2,8 +2,9 @@ import { Builder, WebDriver, By, until } from 'selenium-webdriver';
 import * as chrome from 'selenium-webdriver/chrome';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 import { simplifyHtml } from './element-simplifier';
-import type { Config, ClickedElement, InputEvent, RecordedEvent, PageMap } from './types';
+import type { Config, ClickedElement, InputEvent, RecordedEvent, PageMap, RecordingStage, StageEvents } from './types';
 
 export class TestRecorder {
   private driver!: WebDriver;
@@ -14,6 +15,8 @@ export class TestRecorder {
   private currentUrl: string = '';
   private monitoringInterval?: NodeJS.Timeout;
   private isRunning: boolean = false;
+  private currentStage: RecordingStage = 'GIVEN';
+  private stageEvents: StageEvents[] = [];
 
   /**
    * Initialize the Chrome WebDriver with maximized window
@@ -36,12 +39,71 @@ export class TestRecorder {
   async run(): Promise<void> {
     try {
       this.registerShutdownHooks();
+      this.setupStageInput();
       this.driver = await this.initDriver();
       const baseUrl = this.getBaseUrlFromConfig();
       await this.openInitialPage(baseUrl);
+      
+      console.log('\n=== Test Recorder Started ===');
+      console.log('Current Stage: GIVEN');
+      console.log('\nPress keys to switch stages:');
+      console.log('  G = GIVEN stage');
+      console.log('  W = WHEN stage');
+      console.log('  T = THEN stage');
+      console.log('  Ctrl+C = Stop and generate report\n');
+      
       await this.monitorUserInteractions();
     } finally {
       await this.cleanUp();
+    }
+  }
+
+  /**
+   * Set up keyboard input for stage switching
+   */
+  private setupStageInput(): void {
+    if (process.stdin.isTTY) {
+      readline.emitKeypressEvents(process.stdin);
+      process.stdin.setRawMode(true);
+      
+      process.stdin.on('keypress', (_str, key) => {
+        if (key.ctrl && key.name === 'c') {
+          // Let the shutdown hooks handle this
+          return;
+        }
+        
+        const keyName = key.name?.toUpperCase();
+        if (keyName === 'G' || keyName === 'W' || keyName === 'T') {
+          this.switchStage(keyName as 'G' | 'W' | 'T');
+        }
+      });
+    }
+  }
+
+  /**
+   * Switch to a new recording stage
+   */
+  private switchStage(key: 'G' | 'W' | 'T'): void {
+    const stageMap: Record<'G' | 'W' | 'T', RecordingStage> = {
+      'G': 'GIVEN',
+      'W': 'WHEN',
+      'T': 'THEN'
+    };
+    
+    const newStage = stageMap[key];
+    if (newStage !== this.currentStage) {
+      // Save current stage events before switching
+      if (this.pageEventsMap[this.currentUrl]?.length > 0) {
+        this.stageEvents.push({
+          stage: this.currentStage,
+          events: [...this.pageEventsMap[this.currentUrl]]
+        });
+        // Clear current events for new stage
+        this.pageEventsMap[this.currentUrl] = [];
+      }
+      
+      this.currentStage = newStage;
+      console.log(`\n>>> Switched to ${newStage} stage <<<\n`);
     }
   }
 
@@ -343,15 +405,82 @@ export class TestRecorder {
    * Print all recorded elements on shutdown
    */
   private async printRecordedElements(): Promise<void> {
-    console.log('Shutdown hook triggered. Printing recorded elements...');
-    this.printCombinedEvents('All Clicked Elements by Page:');
-    this.printHoveredElements('All Hovered Elements by Page:');
+    // Save final stage events
+    if (this.pageEventsMap[this.currentUrl]?.length > 0) {
+      this.stageEvents.push({
+        stage: this.currentStage,
+        events: [...this.pageEventsMap[this.currentUrl]]
+      });
+    }
+    
+    console.log('\n=== Test Recording Complete ===\n');
+    this.printEventsByStage();
+    this.printHoveredElements('\nAll Hovered Elements:');
+  }
+
+  /**
+   * Print events organized by Given-When-Then stages
+   */
+  private printEventsByStage(): void {
+    const stages: RecordingStage[] = ['GIVEN', 'WHEN', 'THEN'];
+    
+    for (const stage of stages) {
+      const stageEventsList = this.stageEvents.filter(se => se.stage === stage);
+      
+      if (stageEventsList.length === 0) continue;
+      
+      console.log(`\n=== ${stage} ===`);
+      
+      // Combine all events for this stage
+      const allEvents: RecordedEvent[] = [];
+      for (const se of stageEventsList) {
+        allEvents.push(...se.events);
+      }
+      
+      // Build a map of element identifier to last event
+      const lastEventMap = new Map<string, RecordedEvent>();
+      const eventOrder: string[] = [];
+      
+      for (const event of allEvents) {
+        const elementId = this.getElementIdentifier(event.html);
+        
+        // If this element hasn't been seen, track its order
+        if (!lastEventMap.has(elementId)) {
+          eventOrder.push(elementId);
+        }
+        
+        // Always update with the latest event for this element
+        lastEventMap.set(elementId, event);
+      }
+      
+      // Print only the last event for each unique element in order
+      let number = 1;
+      for (const elementId of eventOrder) {
+        const event = lastEventMap.get(elementId)!;
+        const html = simplifyHtml(event.html);
+        
+        if (event.type === 'input') {
+          const value = event.value || '';
+          // Only print if there's actually a value
+          if (value) {
+            console.log(`${number}. keys sent: ${value}; html element:${html}`);
+            number++;
+          }
+        } else if (event.type === 'click') {
+          console.log(`${number}. ${html}`);
+          number++;
+        }
+      }
+    }
   }
 
   /**
    * Print hovered elements
    */
   private printHoveredElements(header: string): void {
+    const hasHovers = Object.values(this.pageHoversMap).some(elements => elements.length > 0);
+    if (!hasHovers) return;
+    
     console.log(header);
     
     for (const [pageUrl, elements] of Object.entries(this.pageHoversMap)) {
@@ -383,54 +512,6 @@ export class TestRecorder {
     
     // Fallback to simplified HTML
     return simplifyHtml(html);
-  }
-
-  /**
-   * Print combined events with consolidated output
-   */
-  private printCombinedEvents(header: string): void {
-    console.log(header);
-    
-    for (const [pageUrl, events] of Object.entries(this.pageEventsMap)) {
-      if (events.length === 0) continue;
-      
-      console.log(`Page URL: ${pageUrl}`);
-      
-      // Build a map of element identifier to last event
-      const lastEventMap = new Map<string, RecordedEvent>();
-      const eventOrder: string[] = [];
-      
-      for (const event of events) {
-        const elementId = this.getElementIdentifier(event.html);
-        
-        // If this element hasn't been seen, track its order
-        if (!lastEventMap.has(elementId)) {
-          eventOrder.push(elementId);
-        }
-        
-        // Always update with the latest event for this element
-        lastEventMap.set(elementId, event);
-      }
-      
-      // Print only the last event for each unique element in order
-      let number = 1;
-      for (const elementId of eventOrder) {
-        const event = lastEventMap.get(elementId)!;
-        const html = simplifyHtml(event.html);
-        
-        if (event.type === 'input') {
-          const value = event.value || '';
-          // Only print if there's actually a value
-          if (value) {
-            console.log(`${number}. keys sent: ${value}; html element:${html}`);
-            number++;
-          }
-        } else if (event.type === 'click') {
-          console.log(`${number}. ${html}`);
-          number++;
-        }
-      }
-    }
   }
 
   /**

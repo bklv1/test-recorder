@@ -34,3 +34,16 @@ export interface RecordedEvent {
  * Generic type for page-based mapping of elements/events
  */
 export type PageMap<T> = Record<string, T[]>;
+
+/**
+ * Recording stage for BDD-style test organization
+ */
+export type RecordingStage = 'GIVEN' | 'WHEN' | 'THEN';
+
+/**
+ * Events organized by stage
+ */
+export interface StageEvents {
+  stage: RecordingStage;
+  events: RecordedEvent[];
+}
