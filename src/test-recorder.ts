@@ -450,8 +450,16 @@ export class TestRecorder {
       }
       
       // Print events grouped by URL
+      let isFirstPage = true;
       for (const [url, events] of eventsByUrl.entries()) {
         const simplifiedUrl = this.simplifyUrl(url);
+        
+        // Add blank line before each page (except the first)
+        if (!isFirstPage) {
+          console.log('');
+        }
+        isFirstPage = false;
+        
         console.log(`##Page: ${simplifiedUrl}`);
         
         // Build a map of element identifier to last event for this URL
