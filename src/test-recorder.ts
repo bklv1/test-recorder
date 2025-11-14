@@ -320,7 +320,7 @@ export class TestRecorder {
       this.pageEventsMap[url] = [];
     }
     
-    const event: RecordedEvent = { type: eventType, html, value };
+    const event: RecordedEvent = { type: eventType, html, value, url };
     this.pageEventsMap[url].push(event);
   }
 
@@ -405,6 +405,23 @@ export class TestRecorder {
   }
 
   /**
+   * Simplify URL by removing parameters and IDs
+   */
+  private simplifyUrl(url: string): string {
+    // Remove semicolon parameters (e.g., ;pageFrom=...)
+    let simplified = url.split(';')[0];
+    
+    // Remove UUID-like path segments (long alphanumeric strings)
+    const parts = simplified.split('/');
+    const filtered = parts.filter(part => {
+      // Keep the part if it's not a UUID-like ID (32+ alphanumeric chars)
+      return !(part.length >= 32 && /^[a-f0-9]+$/i.test(part));
+    });
+    
+    return filtered.join('/');
+  }
+
+  /**
    * Print events organized by Given-When-Then stages
    */
   private printEventsByStage(): void {
@@ -423,38 +440,53 @@ export class TestRecorder {
         allEvents.push(...se.events);
       }
       
-      // Build a map of element identifier to last event
-      const lastEventMap = new Map<string, RecordedEvent>();
-      const eventOrder: string[] = [];
-      
+      // Group events by URL
+      const eventsByUrl = new Map<string, RecordedEvent[]>();
       for (const event of allEvents) {
-        const elementId = this.getElementIdentifier(event.html);
-        
-        // If this element hasn't been seen, track its order
-        if (!lastEventMap.has(elementId)) {
-          eventOrder.push(elementId);
+        if (!eventsByUrl.has(event.url)) {
+          eventsByUrl.set(event.url, []);
         }
-        
-        // Always update with the latest event for this element
-        lastEventMap.set(elementId, event);
+        eventsByUrl.get(event.url)!.push(event);
       }
       
-      // Print only the last event for each unique element in order
-      let number = 1;
-      for (const elementId of eventOrder) {
-        const event = lastEventMap.get(elementId)!;
-        const html = simplifyHtml(event.html);
+      // Print events grouped by URL
+      for (const [url, events] of eventsByUrl.entries()) {
+        const simplifiedUrl = this.simplifyUrl(url);
+        console.log(`##Page: ${simplifiedUrl}`);
         
-        if (event.type === 'input') {
-          const value = event.value || '';
-          // Only print if there's actually a value
-          if (value) {
-            console.log(`${number}. keys sent: ${value}; html element:${html}`);
+        // Build a map of element identifier to last event for this URL
+        const lastEventMap = new Map<string, RecordedEvent>();
+        const eventOrder: string[] = [];
+        
+        for (const event of events) {
+          const elementId = this.getElementIdentifier(event.html);
+          
+          // If this element hasn't been seen, track its order
+          if (!lastEventMap.has(elementId)) {
+            eventOrder.push(elementId);
+          }
+          
+          // Always update with the latest event for this element
+          lastEventMap.set(elementId, event);
+        }
+        
+        // Print only the last event for each unique element in order
+        let number = 1;
+        for (const elementId of eventOrder) {
+          const event = lastEventMap.get(elementId)!;
+          const html = simplifyHtml(event.html);
+          
+          if (event.type === 'input') {
+            const value = event.value || '';
+            // Only print if there's actually a value
+            if (value) {
+              console.log(`${number}. keys sent: ${value}; html element:${html}`);
+              number++;
+            }
+          } else if (event.type === 'click') {
+            console.log(`${number}. ${html}`);
             number++;
           }
-        } else if (event.type === 'click') {
-          console.log(`${number}. ${html}`);
-          number++;
         }
       }
     }

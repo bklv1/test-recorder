@@ -28,6 +28,7 @@ export interface RecordedEvent {
   type: 'click' | 'input';
   html: string;
   value?: string;
+  url: string;
 }
 
 /**
