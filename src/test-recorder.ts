@@ -91,9 +91,16 @@ export class TestRecorder {
         await this.handleUrlChange();
         await this.recordAllInteractions();
       } catch (error) {
-        // If there's a WebDriver error, stop monitoring
-        console.error('Error during monitoring:', error);
+        // If there's a WebDriver error (browser closed), stop monitoring and print report
+        const errorMessage = (error as Error).message || '';
+        if (errorMessage.includes('session deleted') || errorMessage.includes('invalid session')) {
+          console.log('\nBrowser was closed. Generating final report...\n');
+        } else {
+          console.error('Error during monitoring:', error);
+        }
         this.stopMonitoring();
+        await this.printRecordedElements();
+        process.exit(0);
       }
     }, 1000); // Poll every 1 second
     
@@ -358,6 +365,27 @@ export class TestRecorder {
   }
 
   /**
+   * Extract a stable identifier from HTML for element comparison
+   */
+  private getElementIdentifier(html: string): string {
+    // Try to extract id, name, or a combination of attributes
+    const idMatch = html.match(/id="([^"]+)"/);
+    if (idMatch) return `id:${idMatch[1]}`;
+    
+    const nameMatch = html.match(/name="([^"]+)"/);
+    if (nameMatch) return `name:${nameMatch[1]}`;
+    
+    const placeholderMatch = html.match(/placeholder="([^"]+)"/);
+    const typeMatch = html.match(/type="([^"]+)"/);
+    if (placeholderMatch && typeMatch) {
+      return `type-placeholder:${typeMatch[1]}-${placeholderMatch[1]}`;
+    }
+    
+    // Fallback to simplified HTML
+    return simplifyHtml(html);
+  }
+
+  /**
    * Print combined events with consolidated output
    */
   private printCombinedEvents(header: string): void {
@@ -367,34 +395,40 @@ export class TestRecorder {
       if (events.length === 0) continue;
       
       console.log(`Page URL: ${pageUrl}`);
-      let number = 1;
-      const n = events.length;
-      let idx = 0;
       
-      while (idx < n) {
-        const event = events[idx];
+      // Build a map of element identifier to last event
+      const lastEventMap = new Map<string, RecordedEvent>();
+      const eventOrder: string[] = [];
+      
+      for (const event of events) {
+        const elementId = this.getElementIdentifier(event.html);
+        
+        // If this element hasn't been seen, track its order
+        if (!lastEventMap.has(elementId)) {
+          eventOrder.push(elementId);
+        }
+        
+        // Always update with the latest event for this element
+        lastEventMap.set(elementId, event);
+      }
+      
+      // Print only the last event for each unique element in order
+      let number = 1;
+      for (const elementId of eventOrder) {
+        const event = lastEventMap.get(elementId)!;
         const html = simplifyHtml(event.html);
         
-        // Look ahead to see if the next event is for the same html
-        let nextIdx = idx + 1;
-        let currentEvent = event;
-        
-        while (nextIdx < n && simplifyHtml(events[nextIdx].html) === html) {
-          idx = nextIdx;
-          currentEvent = events[idx];
-          nextIdx++;
-        }
-        
-        // Print only the last event in the consecutive run
-        if (currentEvent.type === 'input') {
-          const value = currentEvent.value || '';
-          console.log(`${number}. keys sent: ${value}; html element:${html}`);
-        } else if (currentEvent.type === 'click') {
+        if (event.type === 'input') {
+          const value = event.value || '';
+          // Only print if there's actually a value
+          if (value) {
+            console.log(`${number}. keys sent: ${value}; html element:${html}`);
+            number++;
+          }
+        } else if (event.type === 'click') {
           console.log(`${number}. ${html}`);
+          number++;
         }
-        
-        number++;
-        idx++;
       }
     }
   }
