@@ -1,0 +1,31 @@
+{
+  "name": "test-recorder",
+  "version": "1.0.0",
+  "description": "TypeScript-based Selenium test recorder that captures user interactions",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "selenium",
+    "test-recorder",
+    "automation",
+    "testing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "selenium-webdriver": "^4.25.0",
+    "cheerio": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "@types/selenium-webdriver": "^4.1.26",
+    "typescript": "^5.6.3",
+    "tsx": "^4.19.2"
+  }
+}
