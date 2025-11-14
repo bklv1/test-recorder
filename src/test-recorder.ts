@@ -9,7 +9,6 @@ import type { Config, ClickedElement, InputEvent, RecordedEvent, PageMap, Record
 export class TestRecorder {
   private driver!: WebDriver;
   private pageClicksMap: PageMap<string> = {};
-  private pageHoversMap: PageMap<string> = {};
   private pageInputsMap: PageMap<InputEvent> = {};
   private pageEventsMap: PageMap<RecordedEvent> = {};
   private currentUrl: string = '';
@@ -92,15 +91,24 @@ export class TestRecorder {
     
     const newStage = stageMap[key];
     if (newStage !== this.currentStage) {
-      // Save current stage events before switching
-      if (this.pageEventsMap[this.currentUrl]?.length > 0) {
+      // Save all events from all pages for current stage before switching
+      const allEvents: RecordedEvent[] = [];
+      for (const url in this.pageEventsMap) {
+        if (this.pageEventsMap[url]?.length > 0) {
+          allEvents.push(...this.pageEventsMap[url]);
+        }
+      }
+      
+      if (allEvents.length > 0) {
         this.stageEvents.push({
           stage: this.currentStage,
-          events: [...this.pageEventsMap[this.currentUrl]]
+          events: allEvents
         });
-        // Clear current events for new stage
-        this.pageEventsMap[this.currentUrl] = [];
       }
+      
+      // Clear all events for new stage
+      this.pageEventsMap = {};
+      this.initializePageMaps(this.currentUrl);
       
       this.currentStage = newStage;
       console.log(`\n>>> Switched to ${newStage} stage <<<\n`);
@@ -206,7 +214,6 @@ export class TestRecorder {
    */
   private initializePageMaps(url: string): void {
     if (!this.pageClicksMap[url]) this.pageClicksMap[url] = [];
-    if (!this.pageHoversMap[url]) this.pageHoversMap[url] = [];
     if (!this.pageInputsMap[url]) this.pageInputsMap[url] = [];
     if (!this.pageEventsMap[url]) this.pageEventsMap[url] = [];
   }
@@ -216,7 +223,6 @@ export class TestRecorder {
    */
   private async recordAllInteractions(): Promise<void> {
     await this.recordClickEvents();
-    await this.recordHoverEvents();
     await this.recordInputEvents();
   }
 
@@ -234,20 +240,6 @@ export class TestRecorder {
     }
     
     await this.clearJsArray('localStorage.clickedElements');
-  }
-
-  /**
-   * Record hover events from window variable
-   */
-  private async recordHoverEvents(): Promise<void> {
-    const hoveredHtml = await this.driver.executeScript<string>(
-      'return window.hoveredElementHtml;'
-    );
-    
-    if (hoveredHtml && !this.pageHoversMap[this.currentUrl].includes(hoveredHtml)) {
-      this.pageHoversMap[this.currentUrl].push(hoveredHtml);
-      console.log(`Hovered Element: ${hoveredHtml}`);
-    }
   }
 
   /**
@@ -346,7 +338,6 @@ export class TestRecorder {
     return `
       if (!window.__testRecorderInjected) {
         window.__testRecorderInjected = true;
-        var hoverTimeout;
         if (!localStorage.clickedElements) localStorage.clickedElements = JSON.stringify([]);
         if (!localStorage.inputEvents) localStorage.inputEvents = JSON.stringify([]);
         document.addEventListener('click', function(event) {
@@ -357,17 +348,6 @@ export class TestRecorder {
             url: window.location.href
           });
           localStorage.clickedElements = JSON.stringify(arr);
-        }, true);
-        document.addEventListener('mouseover', function(event) {
-          var element = event.target;
-          hoverTimeout = setTimeout(function() {
-            window.hoveredElementHtml = element.outerHTML;
-            if (!window.hoveredElements) window.hoveredElements = [];
-            window.hoveredElements.push(element.outerHTML);
-          }, 5000);
-        }, true);
-        document.addEventListener('mouseout', function(event) {
-          clearTimeout(hoverTimeout);
         }, true);
         document.addEventListener('input', function(event) {
           var element = event.target;
@@ -405,17 +385,23 @@ export class TestRecorder {
    * Print all recorded elements on shutdown
    */
   private async printRecordedElements(): Promise<void> {
-    // Save final stage events
-    if (this.pageEventsMap[this.currentUrl]?.length > 0) {
+    // Save final stage events from all pages
+    const allEvents: RecordedEvent[] = [];
+    for (const url in this.pageEventsMap) {
+      if (this.pageEventsMap[url]?.length > 0) {
+        allEvents.push(...this.pageEventsMap[url]);
+      }
+    }
+    
+    if (allEvents.length > 0) {
       this.stageEvents.push({
         stage: this.currentStage,
-        events: [...this.pageEventsMap[this.currentUrl]]
+        events: allEvents
       });
     }
     
     console.log('\n=== Test Recording Complete ===\n');
     this.printEventsByStage();
-    this.printHoveredElements('\nAll Hovered Elements:');
   }
 
   /**
@@ -470,25 +456,6 @@ export class TestRecorder {
           console.log(`${number}. ${html}`);
           number++;
         }
-      }
-    }
-  }
-
-  /**
-   * Print hovered elements
-   */
-  private printHoveredElements(header: string): void {
-    const hasHovers = Object.values(this.pageHoversMap).some(elements => elements.length > 0);
-    if (!hasHovers) return;
-    
-    console.log(header);
-    
-    for (const [pageUrl, elements] of Object.entries(this.pageHoversMap)) {
-      if (elements.length > 0) {
-        console.log(`Page URL: ${pageUrl}`);
-        elements.forEach((elementHtml, idx) => {
-          console.log(`${idx + 1}. ${simplifyHtml(elementHtml)}`);
-        });
       }
     }
   }
