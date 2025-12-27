@@ -1,20 +1,28 @@
-import { Builder, WebDriver, By, until } from 'selenium-webdriver';
-import * as chrome from 'selenium-webdriver/chrome';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as readline from 'readline';
-import { simplifyHtml } from './element-simplifier';
-import type { Config, ClickedElement, InputEvent, RecordedEvent, PageMap, RecordingStage, StageEvents } from './types';
+import { Builder, WebDriver, By, until } from "selenium-webdriver";
+import * as chrome from "selenium-webdriver/chrome";
+import * as fs from "fs";
+import * as path from "path";
+import * as readline from "readline";
+import { simplifyHtml } from "./element-simplifier";
+import type {
+  Config,
+  ClickedElement,
+  InputEvent,
+  RecordedEvent,
+  PageMap,
+  RecordingStage,
+  StageEvents,
+} from "./types";
 
 export class TestRecorder {
   private driver!: WebDriver;
   private pageClicksMap: PageMap<string> = {};
   private pageInputsMap: PageMap<InputEvent> = {};
   private pageEventsMap: PageMap<RecordedEvent> = {};
-  private currentUrl: string = '';
+  private currentUrl: string = "";
   private monitoringInterval?: NodeJS.Timeout;
   private isRunning: boolean = false;
-  private currentStage: RecordingStage = 'GIVEN';
+  private currentStage: RecordingStage = "GIVEN";
   private stageEvents: StageEvents[] = [];
 
   /**
@@ -22,13 +30,13 @@ export class TestRecorder {
    */
   private async initDriver(): Promise<WebDriver> {
     const options = new chrome.Options();
-    options.addArguments('--start-maximized');
-    
+    options.addArguments("--start-maximized");
+
     const driver = await new Builder()
-      .forBrowser('chrome')
+      .forBrowser("chrome")
       .setChromeOptions(options)
       .build();
-    
+
     return driver;
   }
 
@@ -42,15 +50,19 @@ export class TestRecorder {
       this.driver = await this.initDriver();
       const baseUrl = this.getBaseUrlFromConfig();
       await this.openInitialPage(baseUrl);
-      
-      console.log('\n=== Test Recorder Started ===');
-      console.log('Current Stage: GIVEN');
-      console.log('\nPress keys to switch stages:');
-      console.log('  G = GIVEN stage');
-      console.log('  W = WHEN stage');
-      console.log('  T = THEN stage');
-      console.log('  Ctrl+C = Stop and generate report\n');
-      
+
+      console.log("\n=== Test Recorder Started ===");
+      console.log("Current Stage: GIVEN");
+      console.log("\nControl Options:");
+      console.log("1. UI Popup (draggable window in browser)");
+      console.log("   - Click GIVEN/WHEN/THEN buttons to switch stages");
+      console.log("   - Drag the header to reposition");
+      console.log("\n2. Terminal Shortcuts (backup method)");
+      console.log("   - Press G = GIVEN stage");
+      console.log("   - Press W = WHEN stage");
+      console.log("   - Press T = THEN stage");
+      console.log("   - Press Ctrl+C = Stop and generate report\n");
+
       await this.monitorUserInteractions();
     } finally {
       await this.cleanUp();
@@ -64,16 +76,16 @@ export class TestRecorder {
     if (process.stdin.isTTY) {
       readline.emitKeypressEvents(process.stdin);
       process.stdin.setRawMode(true);
-      
-      process.stdin.on('keypress', (_str, key) => {
-        if (key.ctrl && key.name === 'c') {
+
+      process.stdin.on("keypress", (_str, key) => {
+        if (key.ctrl && key.name === "c") {
           // Let the shutdown hooks handle this
           return;
         }
-        
+
         const keyName = key.name?.toUpperCase();
-        if (keyName === 'G' || keyName === 'W' || keyName === 'T') {
-          this.switchStage(keyName as 'G' | 'W' | 'T');
+        if (keyName === "G" || keyName === "W" || keyName === "T") {
+          this.switchStage(keyName as "G" | "W" | "T");
         }
       });
     }
@@ -82,13 +94,13 @@ export class TestRecorder {
   /**
    * Switch to a new recording stage
    */
-  private switchStage(key: 'G' | 'W' | 'T'): void {
-    const stageMap: Record<'G' | 'W' | 'T', RecordingStage> = {
-      'G': 'GIVEN',
-      'W': 'WHEN',
-      'T': 'THEN'
+  private async switchStage(key: "G" | "W" | "T"): Promise<void> {
+    const stageMap: Record<"G" | "W" | "T", RecordingStage> = {
+      G: "GIVEN",
+      W: "WHEN",
+      T: "THEN",
     };
-    
+
     const newStage = stageMap[key];
     if (newStage !== this.currentStage) {
       // Save all events from all pages for current stage before switching
@@ -98,21 +110,81 @@ export class TestRecorder {
           allEvents.push(...this.pageEventsMap[url]);
         }
       }
-      
+
       if (allEvents.length > 0) {
         this.stageEvents.push({
           stage: this.currentStage,
-          events: allEvents
+          events: allEvents,
         });
       }
-      
+
       // Clear all events for new stage
       this.pageEventsMap = {};
       this.initializePageMaps(this.currentUrl);
-      
+
       this.currentStage = newStage;
       console.log(`\n>>> Switched to ${newStage} stage <<<\n`);
+
+      // Update the popup UI to reflect the new stage
+      await this.updatePopupUI(newStage);
     }
+  }
+
+  /**
+   * Check if stage was changed from UI popup
+   */
+  private async checkStageChange(): Promise<void> {
+    try {
+      const stageChange = await this.driver.executeScript<string>(
+        `return localStorage.stageChange || null`
+      );
+
+      if (stageChange && stageChange !== this.currentStage) {
+        const key = this.getStageKey(stageChange as RecordingStage);
+        await this.switchStage(key);
+        await this.driver.executeScript(`delete localStorage.stageChange`);
+      }
+    } catch (error) {
+      // Silently ignore errors (e.g., if page hasn't loaded yet)
+    }
+  }
+
+  /**
+   * Update the popup UI to reflect current stage
+   */
+  private async updatePopupUI(stage: RecordingStage): Promise<void> {
+    try {
+      await this.driver.executeScript(`
+        if (typeof localStorage !== 'undefined') {
+          localStorage.currentStage = '${stage}';
+          var currentStageEl = document.getElementById('current-stage');
+          if (currentStageEl) {
+            currentStageEl.textContent = '${stage}';
+          }
+          var buttons = document.querySelectorAll('.stage-btn');
+          buttons.forEach(function(btn) {
+            btn.classList.remove('active');
+            if (btn.dataset.stage === '${stage}') {
+              btn.classList.add('active');
+            }
+          });
+        }
+      `);
+    } catch (error) {
+      // Silently ignore errors (e.g., if popup isn't rendered yet)
+    }
+  }
+
+  /**
+   * Convert stage name to keyboard key
+   */
+  private getStageKey(stage: RecordingStage): "G" | "W" | "T" {
+    const stageKeyMap: Record<RecordingStage, "G" | "W" | "T"> = {
+      GIVEN: "G",
+      WHEN: "W",
+      THEN: "T",
+    };
+    return stageKeyMap[stage];
   }
 
   /**
@@ -120,18 +192,20 @@ export class TestRecorder {
    */
   private getBaseUrlFromConfig(): string {
     try {
-      const configPath = path.join(process.cwd(), 'config.json');
-      const configData = fs.readFileSync(configPath, 'utf-8');
+      const configPath = path.join(process.cwd(), "config.json");
+      const configData = fs.readFileSync(configPath, "utf-8");
       const config: Config = JSON.parse(configData);
-      
+
       if (!config.base_url) {
         throw new Error("The 'base_url' in config.json is empty.");
       }
-      
+
       return config.base_url;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new Error("config.json not found. Please create it with a 'base_url' key.");
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(
+          "config.json not found. Please create it with a 'base_url' key."
+        );
       }
       if (error instanceof SyntaxError) {
         throw new Error("Invalid JSON in config.json");
@@ -155,25 +229,28 @@ export class TestRecorder {
    */
   private async monitorUserInteractions(): Promise<void> {
     this.isRunning = true;
-    
+
     this.monitoringInterval = setInterval(async () => {
       try {
         await this.handleUrlChange();
         await this.recordAllInteractions();
       } catch (error) {
         // If there's a WebDriver error (browser closed), stop monitoring and print report
-        const errorMessage = (error as Error).message || '';
-        if (errorMessage.includes('session deleted') || errorMessage.includes('invalid session')) {
-          console.log('\nBrowser was closed. Generating final report...\n');
+        const errorMessage = (error as Error).message || "";
+        if (
+          errorMessage.includes("session deleted") ||
+          errorMessage.includes("invalid session")
+        ) {
+          console.log("\nBrowser was closed. Generating final report...\n");
         } else {
-          console.error('Error during monitoring:', error);
+          console.error("Error during monitoring:", error);
         }
         this.stopMonitoring();
         await this.printRecordedElements();
         process.exit(0);
       }
     }, 1000); // Poll every 1 second
-    
+
     // Keep the process running
     return new Promise<void>((resolve) => {
       const checkInterval = setInterval(() => {
@@ -200,10 +277,10 @@ export class TestRecorder {
    */
   private async handleUrlChange(): Promise<void> {
     const newUrl = await this.driver.getCurrentUrl();
-    
+
     if (this.currentUrl !== newUrl) {
       this.currentUrl = newUrl;
-      await this.driver.wait(until.elementLocated(By.tagName('body')), 10000);
+      await this.driver.wait(until.elementLocated(By.tagName("body")), 10000);
       await this.injectEventListeners();
       this.initializePageMaps(this.currentUrl);
     }
@@ -222,6 +299,7 @@ export class TestRecorder {
    * Record all types of interactions
    */
   private async recordAllInteractions(): Promise<void> {
+    await this.checkStageChange();
     await this.recordClickEvents();
     await this.recordInputEvents();
   }
@@ -230,37 +308,41 @@ export class TestRecorder {
    * Record click events from localStorage
    */
   private async recordClickEvents(): Promise<void> {
-    const clickedElements = await this.getJsArray<ClickedElement>('localStorage.clickedElements');
-    
+    const clickedElements = await this.getJsArray<ClickedElement>(
+      "localStorage.clickedElements"
+    );
+
     for (const clicked of clickedElements) {
       const pageUrl = clicked.url || this.currentUrl;
-      const html = clicked.html || '';
+      const html = clicked.html || "";
       this.appendUnique(this.pageClicksMap, pageUrl, html);
-      this.appendEvent(pageUrl, 'click', html);
+      this.appendEvent(pageUrl, "click", html);
     }
-    
-    await this.clearJsArray('localStorage.clickedElements');
+
+    await this.clearJsArray("localStorage.clickedElements");
   }
 
   /**
    * Record input events from localStorage
    */
   private async recordInputEvents(): Promise<void> {
-    const inputEvents = await this.getJsArray<InputEvent>('localStorage.inputEvents');
-    
+    const inputEvents = await this.getJsArray<InputEvent>(
+      "localStorage.inputEvents"
+    );
+
     for (const event of inputEvents) {
-      const value = event.value || '';
-      const html = event.html || '';
-      
+      const value = event.value || "";
+      const html = event.html || "";
+
       if (!this.isInputAlreadyRecorded(this.currentUrl, value, html)) {
         this.pageInputsMap[this.currentUrl].push(event);
         console.log(`Input Event: keys sent: ${value}; html element:${html}`);
       }
-      
-      this.appendEvent(this.currentUrl, 'input', html, value);
+
+      this.appendEvent(this.currentUrl, "input", html, value);
     }
-    
-    await this.clearJsArray('localStorage.inputEvents');
+
+    await this.clearJsArray("localStorage.inputEvents");
   }
 
   /**
@@ -287,11 +369,15 @@ export class TestRecorder {
   /**
    * Append a unique value to a page map
    */
-  private appendUnique(mapping: PageMap<string>, key: string, value: string): void {
+  private appendUnique(
+    mapping: PageMap<string>,
+    key: string,
+    value: string
+  ): void {
     if (!mapping[key]) {
       mapping[key] = [];
     }
-    
+
     if (!mapping[key].includes(value)) {
       mapping[key].push(value);
       console.log(`Clicked Element: ${value} (URL: ${key})`);
@@ -301,7 +387,11 @@ export class TestRecorder {
   /**
    * Check if an input event is already recorded
    */
-  private isInputAlreadyRecorded(url: string, value: string, html: string): boolean {
+  private isInputAlreadyRecorded(
+    url: string,
+    value: string,
+    html: string
+  ): boolean {
     return this.pageInputsMap[url].some(
       (e) => e.value === value && e.html === html
     );
@@ -312,14 +402,14 @@ export class TestRecorder {
    */
   private appendEvent(
     url: string,
-    eventType: 'click' | 'input',
+    eventType: "click" | "input",
     html: string,
     value?: string
   ): void {
     if (!this.pageEventsMap[url]) {
       this.pageEventsMap[url] = [];
     }
-    
+
     const event: RecordedEvent = { type: eventType, html, value, url };
     this.pageEventsMap[url].push(event);
   }
@@ -332,7 +422,7 @@ export class TestRecorder {
   }
 
   /**
-   * Get the JavaScript code for event listeners
+   * Get the JavaScript code for event listeners and popup UI
    */
   private getEventListenerScript(): string {
     return `
@@ -340,6 +430,9 @@ export class TestRecorder {
         window.__testRecorderInjected = true;
         if (!localStorage.clickedElements) localStorage.clickedElements = JSON.stringify([]);
         if (!localStorage.inputEvents) localStorage.inputEvents = JSON.stringify([]);
+        if (!localStorage.currentStage) localStorage.currentStage = 'GIVEN';
+        
+        // Event listeners for clicks and inputs
         document.addEventListener('click', function(event) {
           var element = event.target;
           var arr = JSON.parse(localStorage.clickedElements);
@@ -349,6 +442,7 @@ export class TestRecorder {
           });
           localStorage.clickedElements = JSON.stringify(arr);
         }, true);
+        
         document.addEventListener('input', function(event) {
           var element = event.target;
           if (element.tagName.toLowerCase() === 'input' || element.tagName.toLowerCase() === 'textarea') {
@@ -360,6 +454,163 @@ export class TestRecorder {
             localStorage.inputEvents = JSON.stringify(arr);
           }
         }, true);
+        
+        // Create the stage control popup
+        var popup = document.createElement('div');
+        popup.id = 'test-recorder-popup';
+        popup.innerHTML = \`
+          <div class="popup-header" id="popup-header">Test Recorder Control</div>
+          <div class="popup-stage">Current: <span id="current-stage">GIVEN</span></div>
+          <div class="popup-buttons">
+            <button data-stage="GIVEN" class="stage-btn active">GIVEN</button>
+            <button data-stage="WHEN" class="stage-btn">WHEN</button>
+            <button data-stage="THEN" class="stage-btn">THEN</button>
+          </div>
+        \`;
+        
+        // Apply styles
+        var style = document.createElement('style');
+        style.textContent = \`
+          #test-recorder-popup {
+            position: fixed;
+            width: 250px;
+            background: rgba(44, 62, 80, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 999999;
+            font-family: Arial, sans-serif;
+            color: white;
+            user-select: none;
+          }
+          .popup-header {
+            padding: 12px;
+            background: rgba(52, 73, 94, 0.95);
+            border-radius: 8px 8px 0 0;
+            font-weight: bold;
+            cursor: move;
+            text-align: center;
+            font-size: 14px;
+          }
+          .popup-stage {
+            padding: 10px 12px;
+            text-align: center;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          }
+          #current-stage {
+            font-weight: bold;
+            color: #3498db;
+          }
+          .popup-buttons {
+            padding: 12px;
+          }
+          .stage-btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 8px;
+            border: none;
+            border-radius: 4px;
+            background: #7f8c8d;
+            color: white;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+          }
+          .stage-btn:last-child {
+            margin-bottom: 0;
+          }
+          .stage-btn:hover {
+            background: #95a5a6;
+            transform: translateY(-1px);
+          }
+          .stage-btn.active {
+            background: #27ae60;
+            box-shadow: 0 2px 8px rgba(39, 174, 96, 0.4);
+          }
+          .stage-btn.active:hover {
+            background: #2ecc71;
+          }
+        \`;
+        
+        document.head.appendChild(style);
+        document.body.appendChild(popup);
+        
+        // Restore position from localStorage or use default top-right
+        if (localStorage.popupPosition) {
+          var savedPos = JSON.parse(localStorage.popupPosition);
+          popup.style.left = savedPos.x + 'px';
+          popup.style.top = savedPos.y + 'px';
+          popup.style.right = 'auto';
+        } else {
+          // Default to top-right corner
+          popup.style.right = '20px';
+          popup.style.top = '20px';
+        }
+        
+        // Restore current stage
+        var currentStage = localStorage.currentStage || 'GIVEN';
+        document.getElementById('current-stage').textContent = currentStage;
+        var buttons = popup.querySelectorAll('.stage-btn');
+        buttons.forEach(function(btn) {
+          if (btn.dataset.stage === currentStage) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        });
+        
+        // Make popup draggable
+        var isDragging = false;
+        var currentX, currentY, initialX, initialY;
+        var header = document.getElementById('popup-header');
+        
+        header.addEventListener('mousedown', function(e) {
+          isDragging = true;
+          // Convert to left positioning when dragging starts
+          if (popup.style.right && popup.style.right !== 'auto') {
+            popup.style.left = popup.offsetLeft + 'px';
+            popup.style.right = 'auto';
+          }
+          initialX = e.clientX - popup.offsetLeft;
+          initialY = e.clientY - popup.offsetTop;
+        });
+        
+        document.addEventListener('mousemove', function(e) {
+          if (isDragging) {
+            e.preventDefault();
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            popup.style.left = currentX + 'px';
+            popup.style.top = currentY + 'px';
+          }
+        });
+        
+        document.addEventListener('mouseup', function() {
+          if (isDragging) {
+            isDragging = false;
+            localStorage.popupPosition = JSON.stringify({
+              x: popup.offsetLeft,
+              y: popup.offsetTop
+            });
+          }
+        });
+        
+        // Add click handlers for stage buttons
+        buttons.forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var stage = this.dataset.stage;
+            localStorage.stageChange = stage;
+            localStorage.currentStage = stage;
+            document.getElementById('current-stage').textContent = stage;
+            buttons.forEach(function(b) {
+              b.classList.remove('active');
+            });
+            this.classList.add('active');
+          });
+        });
       }
     `;
   }
@@ -374,9 +625,9 @@ export class TestRecorder {
       process.exit(0);
     };
 
-    process.on('SIGINT', cleanup);  // Ctrl+C
-    process.on('SIGTERM', cleanup); // Kill signal
-    process.on('exit', () => {
+    process.on("SIGINT", cleanup); // Ctrl+C
+    process.on("SIGTERM", cleanup); // Kill signal
+    process.on("exit", () => {
       this.stopMonitoring();
     });
   }
@@ -392,15 +643,15 @@ export class TestRecorder {
         allEvents.push(...this.pageEventsMap[url]);
       }
     }
-    
+
     if (allEvents.length > 0) {
       this.stageEvents.push({
         stage: this.currentStage,
-        events: allEvents
+        events: allEvents,
       });
     }
-    
-    console.log('\n=== Test Recording Complete ===\n');
+
+    console.log("\n=== Test Recording Complete ===\n");
     this.printEventsByStage();
   }
 
@@ -409,37 +660,39 @@ export class TestRecorder {
    */
   private simplifyUrl(url: string): string {
     // Remove semicolon parameters (e.g., ;pageFrom=...)
-    let simplified = url.split(';')[0];
-    
+    let simplified = url.split(";")[0];
+
     // Remove UUID-like path segments (long alphanumeric strings)
-    const parts = simplified.split('/');
-    const filtered = parts.filter(part => {
+    const parts = simplified.split("/");
+    const filtered = parts.filter((part) => {
       // Keep the part if it's not a UUID-like ID (32+ alphanumeric chars)
       return !(part.length >= 32 && /^[a-f0-9]+$/i.test(part));
     });
-    
-    return filtered.join('/');
+
+    return filtered.join("/");
   }
 
   /**
    * Print events organized by Given-When-Then stages
    */
   private printEventsByStage(): void {
-    const stages: RecordingStage[] = ['GIVEN', 'WHEN', 'THEN'];
-    
+    const stages: RecordingStage[] = ["GIVEN", "WHEN", "THEN"];
+
     for (const stage of stages) {
-      const stageEventsList = this.stageEvents.filter(se => se.stage === stage);
-      
+      const stageEventsList = this.stageEvents.filter(
+        (se) => se.stage === stage
+      );
+
       if (stageEventsList.length === 0) continue;
-      
+
       console.log(`\n=== ${stage} ===`);
-      
+
       // Combine all events for this stage
       const allEvents: RecordedEvent[] = [];
       for (const se of stageEventsList) {
         allEvents.push(...se.events);
       }
-      
+
       // Group events by URL
       const eventsByUrl = new Map<string, RecordedEvent[]>();
       for (const event of allEvents) {
@@ -448,50 +701,52 @@ export class TestRecorder {
         }
         eventsByUrl.get(event.url)!.push(event);
       }
-      
+
       // Print events grouped by URL
       let isFirstPage = true;
       for (const [url, events] of eventsByUrl.entries()) {
         const simplifiedUrl = this.simplifyUrl(url);
-        
+
         // Add blank line before each page (except the first)
         if (!isFirstPage) {
-          console.log('');
+          console.log("");
         }
         isFirstPage = false;
-        
+
         console.log(`##Page: ${simplifiedUrl}`);
-        
+
         // Build a map of element identifier to last event for this URL
         const lastEventMap = new Map<string, RecordedEvent>();
         const eventOrder: string[] = [];
-        
+
         for (const event of events) {
           const elementId = this.getElementIdentifier(event.html);
-          
+
           // If this element hasn't been seen, track its order
           if (!lastEventMap.has(elementId)) {
             eventOrder.push(elementId);
           }
-          
+
           // Always update with the latest event for this element
           lastEventMap.set(elementId, event);
         }
-        
+
         // Print only the last event for each unique element in order
         let number = 1;
         for (const elementId of eventOrder) {
           const event = lastEventMap.get(elementId)!;
           const html = simplifyHtml(event.html);
-          
-          if (event.type === 'input') {
-            const value = event.value || '';
+
+          if (event.type === "input") {
+            const value = event.value || "";
             // Only print if there's actually a value
             if (value) {
-              console.log(`${number}. keys sent: ${value}; html element:${html}`);
+              console.log(
+                `${number}. keys sent: ${value}; html element:${html}`
+              );
               number++;
             }
-          } else if (event.type === 'click') {
+          } else if (event.type === "click") {
             console.log(`${number}. ${html}`);
             number++;
           }
@@ -507,16 +762,16 @@ export class TestRecorder {
     // Try to extract id, name, or a combination of attributes
     const idMatch = html.match(/id="([^"]+)"/);
     if (idMatch) return `id:${idMatch[1]}`;
-    
+
     const nameMatch = html.match(/name="([^"]+)"/);
     if (nameMatch) return `name:${nameMatch[1]}`;
-    
+
     const placeholderMatch = html.match(/placeholder="([^"]+)"/);
     const typeMatch = html.match(/type="([^"]+)"/);
     if (placeholderMatch && typeMatch) {
       return `type-placeholder:${typeMatch[1]}-${placeholderMatch[1]}`;
     }
-    
+
     // Fallback to simplified HTML
     return simplifyHtml(html);
   }
