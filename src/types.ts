@@ -3,7 +3,13 @@
  */
 export interface Config {
   base_url: string;
+  output_mode?: OutputMode;
 }
+
+/**
+ * Output mode for recording
+ */
+export type OutputMode = "html" | "accessible";
 
 /**
  * Represents a clicked element captured during recording
@@ -11,6 +17,9 @@ export interface Config {
 export interface ClickedElement {
   html: string;
   url: string;
+  role?: string;
+  name?: string;
+  elementType?: string;
 }
 
 /**
@@ -19,16 +28,22 @@ export interface ClickedElement {
 export interface InputEvent {
   value: string;
   html: string;
+  role?: string;
+  name?: string;
+  elementType?: string;
 }
 
 /**
  * Represents a recorded event (click or input)
  */
 export interface RecordedEvent {
-  type: 'click' | 'input';
+  type: "click" | "input";
   html: string;
   value?: string;
   url: string;
+  role?: string;
+  name?: string;
+  elementType?: string;
 }
 
 /**
@@ -39,7 +54,7 @@ export type PageMap<T> = Record<string, T[]>;
 /**
  * Recording stage for BDD-style test organization
  */
-export type RecordingStage = 'GIVEN' | 'WHEN' | 'THEN';
+export type RecordingStage = "GIVEN" | "WHEN" | "THEN";
 
 /**
  * Events organized by stage

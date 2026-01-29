@@ -7,6 +7,8 @@
     "build": "tsc",
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
+    "start:accessible": "node -e \"const fs=require('fs');const c=JSON.parse(fs.readFileSync('config.json','utf8'));c.output_mode='accessible';fs.writeFileSync('config.json',JSON.stringify(c,null,2));\" && tsx src/index.ts",
+    "start:html": "node -e \"const fs=require('fs');const c=JSON.parse(fs.readFileSync('config.json','utf8'));c.output_mode='html';fs.writeFileSync('config.json',JSON.stringify(c,null,2));\" && tsx src/index.ts",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

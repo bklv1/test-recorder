@@ -12,6 +12,7 @@ import type {
   PageMap,
   RecordingStage,
   StageEvents,
+  OutputMode,
 } from "./types";
 
 export class TestRecorder {
@@ -24,6 +25,7 @@ export class TestRecorder {
   private isRunning: boolean = false;
   private currentStage: RecordingStage = "GIVEN";
   private stageEvents: StageEvents[] = [];
+  private outputMode: OutputMode = "html";
 
   /**
    * Initialize the Chrome WebDriver with maximized window
@@ -48,7 +50,9 @@ export class TestRecorder {
       this.registerShutdownHooks();
       this.setupStageInput();
       this.driver = await this.initDriver();
-      const baseUrl = this.getBaseUrlFromConfig();
+      const config = this.getConfigFromFile();
+      const baseUrl = config.base_url;
+      this.outputMode = config.output_mode ?? "html";
       await this.openInitialPage(baseUrl);
 
       console.log("\n=== Test Recorder Started ===");
@@ -136,7 +140,7 @@ export class TestRecorder {
   private async checkStageChange(): Promise<void> {
     try {
       const stageChange = await this.driver.executeScript<string>(
-        `return localStorage.stageChange || null`
+        `return localStorage.stageChange || null`,
       );
 
       if (stageChange && stageChange !== this.currentStage) {
@@ -188,9 +192,9 @@ export class TestRecorder {
   }
 
   /**
-   * Read and validate the base URL from config.json
+   * Read and validate the config from config.json
    */
-  private getBaseUrlFromConfig(): string {
+  private getConfigFromFile(): Config {
     try {
       const configPath = path.join(process.cwd(), "config.json");
       const configData = fs.readFileSync(configPath, "utf-8");
@@ -200,11 +204,11 @@ export class TestRecorder {
         throw new Error("The 'base_url' in config.json is empty.");
       }
 
-      return config.base_url;
+      return config;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(
-          "config.json not found. Please create it with a 'base_url' key."
+          "config.json not found. Please create it with a 'base_url' key.",
         );
       }
       if (error instanceof SyntaxError) {
@@ -309,14 +313,14 @@ export class TestRecorder {
    */
   private async recordClickEvents(): Promise<void> {
     const clickedElements = await this.getJsArray<ClickedElement>(
-      "localStorage.clickedElements"
+      "localStorage.clickedElements",
     );
 
     for (const clicked of clickedElements) {
       const pageUrl = clicked.url || this.currentUrl;
       const html = clicked.html || "";
       this.appendUnique(this.pageClicksMap, pageUrl, html);
-      this.appendEvent(pageUrl, "click", html);
+      this.appendEvent(pageUrl, "click", html, undefined, clicked);
     }
 
     await this.clearJsArray("localStorage.clickedElements");
@@ -327,7 +331,7 @@ export class TestRecorder {
    */
   private async recordInputEvents(): Promise<void> {
     const inputEvents = await this.getJsArray<InputEvent>(
-      "localStorage.inputEvents"
+      "localStorage.inputEvents",
     );
 
     for (const event of inputEvents) {
@@ -339,7 +343,7 @@ export class TestRecorder {
         console.log(`Input Event: keys sent: ${value}; html element:${html}`);
       }
 
-      this.appendEvent(this.currentUrl, "input", html, value);
+      this.appendEvent(this.currentUrl, "input", html, value, event);
     }
 
     await this.clearJsArray("localStorage.inputEvents");
@@ -351,7 +355,7 @@ export class TestRecorder {
   private async getJsArray<T>(storageKey: string): Promise<T[]> {
     try {
       const result = await this.driver.executeScript<T[]>(
-        `return JSON.parse(${storageKey} || '[]')`
+        `return JSON.parse(${storageKey} || '[]')`,
       );
       return result || [];
     } catch {
@@ -372,7 +376,7 @@ export class TestRecorder {
   private appendUnique(
     mapping: PageMap<string>,
     key: string,
-    value: string
+    value: string,
   ): void {
     if (!mapping[key]) {
       mapping[key] = [];
@@ -390,10 +394,10 @@ export class TestRecorder {
   private isInputAlreadyRecorded(
     url: string,
     value: string,
-    html: string
+    html: string,
   ): boolean {
     return this.pageInputsMap[url].some(
-      (e) => e.value === value && e.html === html
+      (e) => e.value === value && e.html === html,
     );
   }
 
@@ -404,13 +408,22 @@ export class TestRecorder {
     url: string,
     eventType: "click" | "input",
     html: string,
-    value?: string
+    value?: string,
+    metadata?: { role?: string; name?: string; elementType?: string },
   ): void {
     if (!this.pageEventsMap[url]) {
       this.pageEventsMap[url] = [];
     }
 
-    const event: RecordedEvent = { type: eventType, html, value, url };
+    const event: RecordedEvent = {
+      type: eventType,
+      html,
+      value,
+      url,
+      role: metadata?.role,
+      name: metadata?.name,
+      elementType: metadata?.elementType,
+    };
     this.pageEventsMap[url].push(event);
   }
 
@@ -433,12 +446,67 @@ export class TestRecorder {
         if (!localStorage.currentStage) localStorage.currentStage = 'GIVEN';
         
         // Event listeners for clicks and inputs
+        function getAccessibleName(element) {
+          if (!element || !element.getAttribute) return '';
+          var ariaLabel = element.getAttribute('aria-label');
+          if (ariaLabel) return ariaLabel.trim();
+          var labelledBy = element.getAttribute('aria-labelledby');
+          if (labelledBy) {
+            var labelEl = document.getElementById(labelledBy);
+            if (labelEl && labelEl.textContent) return labelEl.textContent.trim();
+          }
+          var id = element.getAttribute('id');
+          if (id) {
+            var label = document.querySelector('label[for="' + id + '"]');
+            if (label && label.textContent) return label.textContent.trim();
+          }
+          if (element.labels && element.labels.length > 0) {
+            var labelText = element.labels[0].textContent;
+            if (labelText) return labelText.trim();
+          }
+          var placeholder = element.getAttribute('placeholder');
+          if (placeholder) return placeholder.trim();
+          var text = element.textContent;
+          return text ? text.trim() : '';
+        }
+
+        function getRole(element) {
+          if (!element) return '';
+          var explicit = element.getAttribute && element.getAttribute('role');
+          if (explicit) return explicit.trim();
+          var tag = element.tagName ? element.tagName.toLowerCase() : '';
+          if (tag === 'button') return 'button';
+          if (tag === 'a' && element.getAttribute('href')) return 'link';
+          if (tag === 'input') {
+            var type = (element.getAttribute('type') || 'text').toLowerCase();
+            if (type === 'checkbox') return 'checkbox';
+            if (type === 'radio') return 'radio';
+            if (type === 'submit' || type === 'button' || type === 'reset') return 'button';
+            return 'textbox';
+          }
+          if (tag === 'textarea') return 'textbox';
+          if (tag === 'select') return 'combobox';
+          return tag;
+        }
+
+        function getElementType(element) {
+          if (!element) return '';
+          var tag = element.tagName ? element.tagName.toLowerCase() : '';
+          if (tag === 'input') {
+            return (element.getAttribute('type') || 'text').toLowerCase();
+          }
+          return tag;
+        }
+
         document.addEventListener('click', function(event) {
           var element = event.target;
           var arr = JSON.parse(localStorage.clickedElements);
           arr.push({
             html: element.outerHTML,
-            url: window.location.href
+            url: window.location.href,
+            role: getRole(element),
+            name: getAccessibleName(element),
+            elementType: getElementType(element)
           });
           localStorage.clickedElements = JSON.stringify(arr);
         }, true);
@@ -449,7 +517,10 @@ export class TestRecorder {
             var arr = JSON.parse(localStorage.inputEvents);
             arr.push({
               value: element.value,
-              html: element.outerHTML
+              html: element.outerHTML,
+              role: getRole(element),
+              name: getAccessibleName(element),
+              elementType: getElementType(element)
             });
             localStorage.inputEvents = JSON.stringify(arr);
           }
@@ -680,7 +751,7 @@ export class TestRecorder {
 
     for (const stage of stages) {
       const stageEventsList = this.stageEvents.filter(
-        (se) => se.stage === stage
+        (se) => se.stage === stage,
       );
 
       if (stageEventsList.length === 0) continue;
@@ -720,7 +791,7 @@ export class TestRecorder {
         const eventOrder: string[] = [];
 
         for (const event of events) {
-          const elementId = this.getElementIdentifier(event.html);
+          const elementId = this.getElementIdentifier(event);
 
           // If this element hasn't been seen, track its order
           if (!lastEventMap.has(elementId)) {
@@ -735,20 +806,43 @@ export class TestRecorder {
         let number = 1;
         for (const elementId of eventOrder) {
           const event = lastEventMap.get(elementId)!;
-          const html = simplifyHtml(event.html);
 
-          if (event.type === "input") {
+          if (this.outputMode === "accessible") {
+            const role = event.role || "";
+            const name = event.name || "";
+            const elementType = event.elementType || "";
             const value = event.value || "";
-            // Only print if there's actually a value
-            if (value) {
-              console.log(
-                `${number}. keys sent: ${value}; html element:${html}`
-              );
+            const typeValue = event.type === "input" ? value : "";
+
+            const details = [
+              role ? `role=${role}` : "",
+              elementType ? `type=${elementType}` : "",
+              name ? `name=${name}` : "",
+              typeValue ? `value=${typeValue}` : "",
+            ]
+              .filter(Boolean)
+              .join(", ");
+
+            if (details) {
+              console.log(`${number}. ${details}`);
               number++;
             }
-          } else if (event.type === "click") {
-            console.log(`${number}. ${html}`);
-            number++;
+          } else {
+            const html = simplifyHtml(event.html);
+
+            if (event.type === "input") {
+              const value = event.value || "";
+              // Only print if there's actually a value
+              if (value) {
+                console.log(
+                  `${number}. keys sent: ${value}; html element:${html}`,
+                );
+                number++;
+              }
+            } else if (event.type === "click") {
+              console.log(`${number}. ${html}`);
+              number++;
+            }
           }
         }
       }
@@ -758,7 +852,15 @@ export class TestRecorder {
   /**
    * Extract a stable identifier from HTML for element comparison
    */
-  private getElementIdentifier(html: string): string {
+  private getElementIdentifier(event: RecordedEvent): string {
+    if (this.outputMode === "accessible") {
+      const role = event.role || "";
+      const name = event.name || "";
+      const elementType = event.elementType || "";
+      return [role, elementType, name].filter(Boolean).join("|");
+    }
+
+    const html = event.html || "";
     // Try to extract id, name, or a combination of attributes
     const idMatch = html.match(/id="([^"]+)"/);
     if (idMatch) return `id:${idMatch[1]}`;

@@ -14,13 +14,21 @@ A TypeScript-based Selenium test recorder that captures user interactions and or
 
    ```json
    {
-     "base_url": "https://your-website.com"
+     "base_url": "https://your-website.com",
+     "output_mode": "html"
    }
    ```
 
 3. **Start recording:**
+
    ```bash
    npm start
+   ```
+
+   To record with accessible type/value output:
+
+   ```bash
+   npm run start:accessible
    ```
 
 ## How to Use
@@ -70,6 +78,21 @@ When you stop recording (Ctrl+C or close browser), you'll get a report grouped b
 === THEN ===
 ##Page: https://example.com/profile
 1. <div class="success-message">
+```
+
+### Accessible Type/Value Output
+
+When `output_mode` is set to `"accessible"`, the report uses type/value pairs with role and accessible name:
+
+```
+=== GIVEN ===
+##Page: https://example.com/login
+1. role=textbox, type=text, name=Username, value=testuser
+
+=== WHEN ===
+##Page: https://example.com/dashboard
+1. role=button, type=button, name=Login
+2. role=link, type=a, name=Profile
 ```
 
 ## Requirements

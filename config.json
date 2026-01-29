@@ -1,3 +1,4 @@
 {
-  "base_url": "https://opensource-demo.orangehrmlive.com/"
+  "base_url": "https://opensource-demo.orangehrmlive.com/",
+  "output_mode": "accessible"
 }
