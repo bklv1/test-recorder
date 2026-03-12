@@ -22,6 +22,8 @@ function describeEvent(event: RecordedEvent): string {
       return `Selected "${event.value ?? ''}" in ${event.role} "${event.name}"`;
     case 'check':
       return `${event.value === 'true' ? 'Checked' : 'Unchecked'} ${event.role} "${event.name}"`;
+    case 'pick':
+      return `Selected "${event.value ?? ''}" for ${event.role} "${event.name}"`;
     default:
       return `Interacted with ${event.role} "${event.name}"`;
   }

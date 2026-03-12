@@ -1,7 +1,7 @@
 export type RecordingStage = 'GIVEN' | 'WHEN' | 'THEN';
 
 export interface RecordedEvent {
-  type: 'click' | 'type' | 'select' | 'check';
+  type: 'click' | 'type' | 'select' | 'check' | 'pick';
   role: string;
   name: string;
   value?: string;

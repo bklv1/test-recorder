@@ -60,7 +60,26 @@ function getName(el: Element): string {
     if (text) return trimText(text);
   }
 
-  // 4. placeholder
+  // 4. Sibling label in a shared field-group container (common in Vue/React component libs
+  //    where <label> and <input> live in separate branches of the same wrapper div)
+  {
+    let ancestor = el.parentElement;
+    let depth = 0;
+    while (ancestor && depth < 6) {
+      const labels = Array.from(ancestor.querySelectorAll<HTMLLabelElement>('label'));
+      for (const label of labels) {
+        // Only consider labels that don't contain the input itself (sibling branch, not wrapper)
+        if (!label.contains(el)) {
+          const text = (label.textContent ?? '').trim();
+          if (text) return trimText(text);
+        }
+      }
+      ancestor = ancestor.parentElement;
+      depth++;
+    }
+  }
+
+  // 5. placeholder
   const placeholder = el.getAttribute('placeholder');
   if (placeholder) return trimText(placeholder);
 
@@ -169,6 +188,28 @@ function sendEvent(event: RecordedEvent): void {
 // Debounce input events: wait 600ms after last keystroke before recording
 const inputTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
 
+// ── Post-click value sniff helpers ────────────────────────────────────────────
+
+function snapshotInputValues(): Map<HTMLInputElement | HTMLTextAreaElement, string> {
+  const map = new Map<HTMLInputElement | HTMLTextAreaElement, string>();
+  document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea').forEach(el => {
+    map.set(el, el.value);
+  });
+  return map;
+}
+
+function findChangedInputs(
+  before: Map<HTMLInputElement | HTMLTextAreaElement, string>
+): Array<{ el: HTMLInputElement | HTMLTextAreaElement; newValue: string }> {
+  const changed: Array<{ el: HTMLInputElement | HTMLTextAreaElement; newValue: string }> = [];
+  before.forEach((oldVal, el) => {
+    if (el.value !== oldVal && el.value.trim() !== '') {
+      changed.push({ el, newValue: el.value });
+    }
+  });
+  return changed;
+}
+
 function onClickCapture(e: MouseEvent): void {
   if (!isRecording) return;
   const target = e.target as Element;
@@ -180,17 +221,38 @@ function onClickCapture(e: MouseEvent): void {
   const tag = target.tagName.toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-  const role = getRole(target);
-  const name = getName(target);
-  if (name === 'unknown' && role === 'Element') return; // unidentifiable
+  // Snapshot input values before the page's click handlers run
+  const before = snapshotInputValues();
 
-  sendEvent({
-    type: 'click',
-    role,
-    name,
-    url: simplifyUrl(window.location.href),
-    timestamp: Date.now(),
-  });
+  setTimeout(() => {
+    const changed = findChangedInputs(before);
+
+    if (changed.length > 0) {
+      // Widget interaction (date picker, custom select, etc.): record the resulting value
+      for (const { el, newValue } of changed) {
+        sendEvent({
+          type: 'pick',
+          role: getRole(el),
+          name: getName(el),
+          value: newValue,
+          url: simplifyUrl(window.location.href),
+          timestamp: Date.now(),
+        });
+      }
+    } else {
+      // Normal click — no input values changed
+      const role = getRole(target);
+      const name = getName(target);
+      if (name === 'unknown' && role === 'Element') return;
+      sendEvent({
+        type: 'click',
+        role,
+        name,
+        url: simplifyUrl(window.location.href),
+        timestamp: Date.now(),
+      });
+    }
+  }, 300);
 }
 
 function onInputCapture(e: Event): void {
