@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Test Recorder</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Test Recorder</h1>
+      <span id="status-badge" class="badge idle">Idle</span>
+    </header>
+
+    <section id="stage-section" class="hidden">
+      <p class="label">Stage</p>
+      <div class="stage-btns">
+        <button class="stage-btn active" data-stage="GIVEN">Given</button>
+        <button class="stage-btn" data-stage="WHEN">When</button>
+        <button class="stage-btn" data-stage="THEN">Then</button>
+      </div>
+    </section>
+
+    <section id="preview-section" class="hidden">
+      <p class="label">Preview</p>
+      <pre id="preview"></pre>
+    </section>
+
+    <section id="actions">
+      <button id="main-btn" class="btn primary">Start Recording</button>
+      <button id="copy-btn" class="btn secondary hidden">Copy to Clipboard</button>
+    </section>
+
+    <p id="copy-msg" class="copy-msg hidden">Copied!</p>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
