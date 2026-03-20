@@ -32,7 +32,7 @@ function injectBadge(): void {
       #__tr_badge img { width: 16px; height: 16px; display: block; animation: blink 1s infinite; }
       @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
     </style>
-    <img src="${chrome.runtime.getURL('icons/play.png')}" alt="rec" />
+    <img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="rec" />
     <span>REC</span>
   `;
 
