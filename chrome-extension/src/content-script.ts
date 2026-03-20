@@ -29,10 +29,10 @@ function injectBadge(): void {
         gap: 8px;
         user-select: none;
       }
-      #__tr_badge .rec-dot { color: #e74c3c; font-size: 16px; animation: blink 1s infinite; }
+      #__tr_badge img { width: 16px; height: 16px; display: block; animation: blink 1s infinite; }
       @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
     </style>
-    <span class="rec-dot">●</span>
+    <img src="${chrome.runtime.getURL('icons/play.png')}" alt="rec" />
     <span>REC</span>
   `;
 
