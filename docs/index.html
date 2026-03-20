@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Test Recorder – Privacy Policy</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 680px;
+      margin: 60px auto;
+      padding: 0 24px;
+      color: #222;
+      line-height: 1.7;
+    }
+    h1 { font-size: 1.6rem; margin-bottom: 4px; }
+    .subtitle { color: #666; font-size: 0.95rem; margin-bottom: 40px; }
+    h2 { font-size: 1.1rem; margin-top: 36px; }
+    p, li { font-size: 0.97rem; }
+    ul { padding-left: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p class="subtitle">Test Recorder Chrome Extension &mdash; Last updated: March 2026</p>
+
+  <h2>Overview</h2>
+  <p>
+    Test Recorder is a browser extension that records your interactions (clicks, typing,
+    scrolling, and navigation) on web pages and exports them as a JSON file in the
+    Chrome DevTools Recorder format. The extension is a local utility — it does not
+    collect, transmit, or store any data outside your browser.
+  </p>
+
+  <h2>Data collection</h2>
+  <p>This extension collects <strong>no personal data</strong>. Specifically:</p>
+  <ul>
+    <li>No data is sent to any external server or third party.</li>
+    <li>No analytics, crash reporting, or telemetry of any kind is used.</li>
+    <li>No user accounts, sign-ins, or identifiers are required or created.</li>
+  </ul>
+
+  <h2>How recorded data is handled</h2>
+  <p>
+    While a recording is active, interaction events (element selectors, input values,
+    scroll positions, and page URLs) are held in the extension's background service
+    worker memory. This data is:
+  </p>
+  <ul>
+    <li>Never written to <code>chrome.storage</code> or any persistent store.</li>
+    <li>Never transmitted over the network.</li>
+    <li>Discarded automatically when the extension is stopped or the browser is closed.</li>
+    <li>Only exported when you explicitly click <em>Copy to Clipboard</em> or <em>Download JSON</em>.</li>
+  </ul>
+
+  <h2>Permissions used</h2>
+  <ul>
+    <li><strong>activeTab</strong> — reads the active tab's URL and title to create the opening navigate step.</li>
+    <li><strong>scripting</strong> — runs a one-time script to read the window dimensions for the setViewport step.</li>
+    <li><strong>tabs</strong> — detects URL changes during recording to insert navigate steps, and relays state changes to the content script.</li>
+    <li><strong>host_permissions (&lt;all_urls&gt;)</strong> — allows the content script to be injected on whichever page you choose to record.</li>
+  </ul>
+
+  <h2>Third-party services</h2>
+  <p>None. The extension contains no third-party code, tracking pixels, or remote resources.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>
+    If the extension's data practices ever change, this page will be updated and the
+    "Last updated" date above will reflect the change.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    For questions about this policy, please open an issue on the
+    <a href="https://github.com/bklv1/test-recorder">project repository</a>.
+  </p>
+</body>
+</html>
