@@ -13,15 +13,6 @@
       <span id="status-badge" class="badge idle">Idle</span>
     </header>
 
-    <section id="stage-section" class="hidden">
-      <p class="label">Stage</p>
-      <div class="stage-btns">
-        <button class="stage-btn active" data-stage="GIVEN">Given</button>
-        <button class="stage-btn" data-stage="WHEN">When</button>
-        <button class="stage-btn" data-stage="THEN">Then</button>
-      </div>
-    </section>
-
     <section id="preview-section" class="hidden">
       <p class="label">Preview</p>
       <pre id="preview"></pre>
@@ -30,6 +21,7 @@
     <section id="actions">
       <button id="main-btn" class="btn primary">Start Recording</button>
       <button id="copy-btn" class="btn secondary hidden">Copy to Clipboard</button>
+      <button id="download-btn" class="btn secondary hidden">Download JSON</button>
     </section>
 
     <p id="copy-msg" class="copy-msg hidden">Copied!</p>

@@ -1,25 +1,12 @@
-import { RecordedEvent, RecordingStage, RecordingState, StageData, MessageAction, MessageResponse } from './shared/types';
+import { RecordingState, MessageAction, MessageResponse } from './shared/types';
 import { formatRecording } from './shared/format';
-
-const STAGES: RecordingStage[] = ['GIVEN', 'WHEN', 'THEN'];
-
-function emptyStages(): Record<RecordingStage, StageData> {
-  return { GIVEN: {}, WHEN: {}, THEN: {} };
-}
 
 let state: RecordingState = {
   isRecording: false,
-  currentStage: 'GIVEN',
-  stages: emptyStages(),
+  recording: { title: 'Recording', steps: [] },
 };
 
-function appendEvent(event: RecordedEvent): void {
-  const stageData = state.stages[state.currentStage];
-  if (!stageData[event.url]) {
-    stageData[event.url] = [];
-  }
-  stageData[event.url].push(event);
-}
+let lastNavigatedUrl: string | null = null;
 
 function notifyAllTabs(): void {
   chrome.tabs.query({}, tabs => {
@@ -33,14 +20,73 @@ function notifyAllTabs(): void {
   });
 }
 
+// Insert a navigate step whenever the active tab navigates during recording
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (!state.isRecording) return;
+  if (changeInfo.status === 'complete' && tab.url && /^https?:\/\//.test(tab.url)) {
+    if (tab.url !== lastNavigatedUrl) {
+      lastNavigatedUrl = tab.url;
+      state.recording.steps.push({
+        type: 'navigate',
+        url: tab.url,
+        assertedEvents: [{ type: 'navigation', url: tab.url, title: tab.title ?? '' }],
+      });
+    }
+  }
+});
+
 chrome.runtime.onMessage.addListener(
   (msg: MessageAction, _sender, sendResponse: (r: MessageResponse) => void) => {
     switch (msg.action) {
-      case 'startRecording':
-        state = { isRecording: true, currentStage: 'GIVEN', stages: emptyStages() };
-        notifyAllTabs();
-        sendResponse({ success: true, state });
-        break;
+      case 'startRecording': {
+        lastNavigatedUrl = null;
+        state = { isRecording: true, recording: { title: 'Recording', steps: [] } };
+
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          const tab = tabs[0];
+          const finish = () => {
+            notifyAllTabs();
+            sendResponse({ success: true, state });
+          };
+
+          const tabId = tab?.id;
+          const tabUrl = tab?.url;
+          if (!tabId || !tabUrl) { finish(); return; }
+
+          // Insert initial navigate step
+          if (/^https?:\/\//.test(tabUrl)) {
+            lastNavigatedUrl = tabUrl;
+            state.recording.steps.push({
+              type: 'navigate',
+              url: tabUrl,
+              assertedEvents: [{ type: 'navigation', url: tabUrl, title: tab.title ?? '' }],
+            });
+          }
+
+          // Insert setViewport at the front using real window dimensions
+          chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => ({
+              width: window.innerWidth,
+              height: window.innerHeight,
+              deviceScaleFactor: window.devicePixelRatio || 1,
+            }),
+          }, (results) => {
+            const vp = results?.[0]?.result as { width: number; height: number; deviceScaleFactor: number } | undefined;
+            state.recording.steps.unshift({
+              type: 'setViewport',
+              width: vp?.width ?? 1280,
+              height: vp?.height ?? 720,
+              deviceScaleFactor: vp?.deviceScaleFactor ?? 1,
+              isMobile: false,
+              hasTouch: false,
+              isLandscape: (vp?.width ?? 1280) > (vp?.height ?? 720),
+            });
+            finish();
+          });
+        });
+        break; // sendResponse called inside callback
+      }
 
       case 'stopRecording':
         state = { ...state, isRecording: false };
@@ -48,19 +94,9 @@ chrome.runtime.onMessage.addListener(
         sendResponse({ success: true, state });
         break;
 
-      case 'switchStage':
-        if (STAGES.includes(msg.stage)) {
-          state = { ...state, currentStage: msg.stage };
-          notifyAllTabs();
-          sendResponse({ success: true, state });
-        } else {
-          sendResponse({ success: false, error: 'Invalid stage' });
-        }
-        break;
-
-      case 'recordEvent':
+      case 'recordStep':
         if (state.isRecording) {
-          appendEvent(msg.event);
+          state.recording.steps.push(msg.step);
         }
         sendResponse({ success: true });
         break;
@@ -71,7 +107,7 @@ chrome.runtime.onMessage.addListener(
         break;
 
       case 'getRecording':
-        sendResponse({ success: true, text: formatRecording(state.stages) });
+        sendResponse({ success: true, text: formatRecording(state.recording) });
         break;
 
       default:

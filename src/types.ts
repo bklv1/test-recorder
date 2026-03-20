@@ -1,50 +1,51 @@
-/**
- * Configuration interface for the test recorder
- */
-export interface Config {
-  base_url: string;
+export interface Config { base_url: string; }
+
+export interface SetViewportStep {
+  type: 'setViewport';
+  width: number;
+  height: number;
+  deviceScaleFactor: number;
+  isMobile: boolean;
+  hasTouch: boolean;
+  isLandscape: boolean;
 }
 
-/**
- * Represents a clicked element captured during recording
- */
-export interface ClickedElement {
-  html: string;
+export interface NavigateStep {
+  type: 'navigate';
   url: string;
+  assertedEvents: Array<{ type: 'navigation'; url: string }>;
 }
 
-/**
- * Represents an input event captured during recording
- */
-export interface InputEvent {
+export interface ClickStep {
+  type: 'click';
+  target: 'main';
+  selectors: string[][];
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface ChangeStep {
+  type: 'change';
+  target: 'main';
+  selectors: string[][];
   value: string;
-  html: string;
 }
 
-/**
- * Represents a recorded event (click or input)
- */
-export interface RecordedEvent {
-  type: 'click' | 'input';
-  html: string;
-  value?: string;
-  url: string;
+export type Step = SetViewportStep | NavigateStep | ClickStep | ChangeStep;
+
+export interface Recording {
+  title: string;
+  steps: Step[];
 }
 
-/**
- * Generic type for page-based mapping of elements/events
- */
-export type PageMap<T> = Record<string, T[]>;
+// Raw events captured by injected JS
+export interface RawClickEvent {
+  selectors: string[][];
+  offsetX: number;
+  offsetY: number;
+}
 
-/**
- * Recording stage for BDD-style test organization
- */
-export type RecordingStage = 'GIVEN' | 'WHEN' | 'THEN';
-
-/**
- * Events organized by stage
- */
-export interface StageEvents {
-  stage: RecordingStage;
-  events: RecordedEvent[];
+export interface RawChangeEvent {
+  selectors: string[][];
+  value: string;
 }

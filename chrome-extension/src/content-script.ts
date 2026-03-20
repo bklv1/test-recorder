@@ -1,108 +1,11 @@
-import { RecordedEvent, RecordingStage, RecordingState } from './shared/types';
-import { simplifyUrl } from './shared/url-utils';
-
-// ── Semantic resolution ───────────────────────────────────────────────────────
-
-function getRole(el: Element): string {
-  const explicitRole = el.getAttribute('role');
-  if (explicitRole) {
-    return explicitRole.charAt(0).toUpperCase() + explicitRole.slice(1);
-  }
-  const tag = el.tagName.toLowerCase();
-  const type = (el.getAttribute('type') ?? '').toLowerCase();
-
-  if (tag === 'button') return 'Button';
-  if (tag === 'a') return 'Link';
-  if (tag === 'select') return 'Dropdown';
-  if (tag === 'textarea') return 'Text area';
-  if (tag === 'input') {
-    if (type === 'checkbox') return 'Checkbox';
-    if (type === 'radio') return 'Radio';
-    if (type === 'submit' || type === 'button' || type === 'reset') return 'Button';
-    return 'Field';
-  }
-  // Clickable divs / spans often have button-like roles
-  if (el.getAttribute('tabindex') != null) return 'Control';
-  return 'Element';
-}
-
-function trimText(text: string, max = 60): string {
-  const t = text.trim().replace(/\s+/g, ' ');
-  return t.length > max ? t.slice(0, max) + '…' : t;
-}
-
-function getName(el: Element): string {
-  // 1. aria-label
-  const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel) return trimText(ariaLabel);
-
-  // 2. aria-labelledby
-  const labelledBy = el.getAttribute('aria-labelledby');
-  if (labelledBy) {
-    const parts = labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent ?? '');
-    const joined = parts.join(' ').trim();
-    if (joined) return trimText(joined);
-  }
-
-  // 3. <label for="id"> or wrapping <label>
-  const id = el.getAttribute('id');
-  if (id) {
-    const label = document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`);
-    if (label) return trimText(label.textContent ?? '');
-  }
-  // Ancestor label
-  const ancestorLabel = el.closest('label');
-  if (ancestorLabel) {
-    // Get label text without the input's own value
-    const clone = ancestorLabel.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('input, select, textarea').forEach(c => c.remove());
-    const text = (clone.textContent ?? '').trim();
-    if (text) return trimText(text);
-  }
-
-  // 4. Sibling label in a shared field-group container (common in Vue/React component libs
-  //    where <label> and <input> live in separate branches of the same wrapper div)
-  {
-    let ancestor = el.parentElement;
-    let depth = 0;
-    while (ancestor && depth < 6) {
-      const labels = Array.from(ancestor.querySelectorAll<HTMLLabelElement>('label'));
-      for (const label of labels) {
-        // Only consider labels that don't contain the input itself (sibling branch, not wrapper)
-        if (!label.contains(el)) {
-          const text = (label.textContent ?? '').trim();
-          if (text) return trimText(text);
-        }
-      }
-      ancestor = ancestor.parentElement;
-      depth++;
-    }
-  }
-
-  // 5. placeholder
-  const placeholder = el.getAttribute('placeholder');
-  if (placeholder) return trimText(placeholder);
-
-  // 5. Inner text (for buttons, links)
-  const innerText = (el as HTMLElement).innerText ?? el.textContent ?? '';
-  if (innerText.trim()) return trimText(innerText);
-
-  // 6. title
-  const title = el.getAttribute('title');
-  if (title) return trimText(title);
-
-  // 7. value (for submit buttons)
-  const value = (el as HTMLInputElement).value;
-  if (value) return trimText(value);
-
-  return 'unknown';
-}
+import { CdpStep, RecordingState } from './shared/types';
+import { generateSelectors } from './shared/selectors';
 
 // ── Floating badge UI ─────────────────────────────────────────────────────────
 
 let badge: HTMLElement | null = null;
 
-function injectBadge(stage: RecordingStage): void {
+function injectBadge(): void {
   if (badge) return;
 
   badge = document.createElement('div');
@@ -123,52 +26,17 @@ function injectBadge(stage: RecordingStage): void {
         box-shadow: 0 4px 16px rgba(0,0,0,0.35);
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         user-select: none;
       }
       #__tr_badge .rec-dot { color: #e74c3c; font-size: 16px; animation: blink 1s infinite; }
       @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-      #__tr_badge .stage-btns { display: flex; gap: 4px; }
-      #__tr_badge .stage-btn {
-        background: #2d2d44;
-        border: none;
-        color: #aaa;
-        border-radius: 6px;
-        padding: 3px 8px;
-        cursor: pointer;
-        font-size: 12px;
-        font-family: inherit;
-      }
-      #__tr_badge .stage-btn.active { background: #27ae60; color: #fff; }
     </style>
     <span class="rec-dot">●</span>
-    <span id="__tr_stage_label">REC · ${stage}</span>
-    <div class="stage-btns">
-      <button class="stage-btn${stage === 'GIVEN' ? ' active' : ''}" data-stage="GIVEN">G</button>
-      <button class="stage-btn${stage === 'WHEN' ? ' active' : ''}" data-stage="WHEN">W</button>
-      <button class="stage-btn${stage === 'THEN' ? ' active' : ''}" data-stage="THEN">T</button>
-    </div>
+    <span>REC</span>
   `;
 
-  badge.querySelectorAll('.stage-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const s = (btn as HTMLElement).dataset.stage as RecordingStage;
-      chrome.runtime.sendMessage({ action: 'switchStage', stage: s });
-    });
-  });
-
   document.documentElement.appendChild(badge);
-}
-
-function updateBadge(stage: RecordingStage): void {
-  if (!badge) return;
-  const label = badge.querySelector('#__tr_stage_label');
-  if (label) label.textContent = `REC · ${stage}`;
-  badge.querySelectorAll('.stage-btn').forEach(btn => {
-    const s = (btn as HTMLElement).dataset.stage;
-    btn.classList.toggle('active', s === stage);
-  });
 }
 
 function removeBadge(): void {
@@ -179,10 +47,9 @@ function removeBadge(): void {
 // ── Event capture ─────────────────────────────────────────────────────────────
 
 let isRecording = false;
-let currentStage: RecordingStage = 'GIVEN';
 
-function sendEvent(event: RecordedEvent): void {
-  chrome.runtime.sendMessage({ action: 'recordEvent', event });
+function sendStep(step: CdpStep): void {
+  chrome.runtime.sendMessage({ action: 'recordStep', step });
 }
 
 // Debounce input events: wait 600ms after last keystroke before recording
@@ -217,39 +84,35 @@ function onClickCapture(e: MouseEvent): void {
   // Skip our own badge
   if (target.closest('#__tr_badge')) return;
 
-  // Skip pure input elements (they'll be handled by input listener)
+  // Skip pure input elements (handled by input listener)
   const tag = target.tagName.toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-  // Snapshot input values before the page's click handlers run
+  const offsetX = Math.round(e.offsetX);
+  const offsetY = Math.round(e.offsetY);
   const before = snapshotInputValues();
 
   setTimeout(() => {
     const changed = findChangedInputs(before);
 
     if (changed.length > 0) {
-      // Widget interaction (date picker, custom select, etc.): record the resulting value
+      // Widget interaction (date picker, custom select, etc.): record as change steps
       for (const { el, newValue } of changed) {
-        sendEvent({
-          type: 'pick',
-          role: getRole(el),
-          name: getName(el),
+        sendStep({
+          type: 'change',
+          target: 'main',
+          selectors: generateSelectors(el),
           value: newValue,
-          url: simplifyUrl(window.location.href),
-          timestamp: Date.now(),
         });
       }
     } else {
-      // Normal click — no input values changed
-      const role = getRole(target);
-      const name = getName(target);
-      if (name === 'unknown' && role === 'Element') return;
-      sendEvent({
+      sendStep({
         type: 'click',
-        role,
-        name,
-        url: simplifyUrl(window.location.href),
-        timestamp: Date.now(),
+        target: 'main',
+        selectors: generateSelectors(target),
+        offsetX,
+        offsetY,
+        assertedEvents: [],
       });
     }
   }, 300);
@@ -265,31 +128,17 @@ function onInputCapture(e: Event): void {
   inputTimers.set(
     target,
     setTimeout(() => {
-      const role = getRole(target);
-      const name = getName(target);
-      const value = target.value;
+      const isSelect = target.tagName.toLowerCase() === 'select';
+      const value = isSelect
+        ? (target as HTMLSelectElement).options[(target as HTMLSelectElement).selectedIndex]?.text ?? target.value
+        : target.value;
 
-      if (target.tagName.toLowerCase() === 'select') {
-        const sel = target as HTMLSelectElement;
-        const selectedText = sel.options[sel.selectedIndex]?.text ?? value;
-        sendEvent({
-          type: 'select',
-          role,
-          name,
-          value: selectedText,
-          url: simplifyUrl(window.location.href),
-          timestamp: Date.now(),
-        });
-      } else {
-        sendEvent({
-          type: 'type',
-          role,
-          name,
-          value,
-          url: simplifyUrl(window.location.href),
-          timestamp: Date.now(),
-        });
-      }
+      sendStep({
+        type: 'change',
+        target: 'main',
+        selectors: generateSelectors(target),
+        value,
+      });
     }, 600)
   );
 }
@@ -300,46 +149,57 @@ function onChangeCapture(e: Event): void {
   const type = (target.getAttribute('type') ?? '').toLowerCase();
   if (type !== 'checkbox' && type !== 'radio') return;
 
-  sendEvent({
-    type: 'check',
-    role: getRole(target),
-    name: getName(target),
+  sendStep({
+    type: 'change',
+    target: 'main',
+    selectors: generateSelectors(target),
     value: String(target.checked),
-    url: simplifyUrl(window.location.href),
-    timestamp: Date.now(),
   });
+}
+
+let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+function onScrollCapture(): void {
+  if (!isRecording) return;
+  if (scrollTimer) clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    sendStep({
+      type: 'scroll',
+      target: 'main',
+      x: Math.round(window.scrollX),
+      y: Math.round(window.scrollY),
+    });
+  }, 200);
 }
 
 function attachListeners(): void {
   document.addEventListener('click', onClickCapture, { capture: true });
   document.addEventListener('input', onInputCapture, { capture: true });
   document.addEventListener('change', onChangeCapture, { capture: true });
+  window.addEventListener('scroll', onScrollCapture, { passive: true });
 }
 
 function detachListeners(): void {
   document.removeEventListener('click', onClickCapture, { capture: true });
   document.removeEventListener('input', onInputCapture, { capture: true });
   document.removeEventListener('change', onChangeCapture, { capture: true });
+  window.removeEventListener('scroll', onScrollCapture);
 }
 
 // ── Background state sync ─────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg: { action: string; state?: RecordingState }) => {
   if (msg.action === 'stateChanged' && msg.state) {
-    const { isRecording: nowRecording, currentStage: nowStage } = msg.state;
+    const { isRecording: nowRecording } = msg.state;
 
     if (nowRecording && !isRecording) {
       isRecording = true;
-      currentStage = nowStage;
       attachListeners();
-      injectBadge(nowStage);
+      injectBadge();
     } else if (!nowRecording && isRecording) {
       isRecording = false;
       detachListeners();
       removeBadge();
-    } else if (nowRecording && nowStage !== currentStage) {
-      currentStage = nowStage;
-      updateBadge(nowStage);
     }
   }
 });
@@ -348,8 +208,7 @@ chrome.runtime.onMessage.addListener((msg: { action: string; state?: RecordingSt
 chrome.runtime.sendMessage({ action: 'getRecordingState' }, (response) => {
   if (response?.success && response.state?.isRecording) {
     isRecording = true;
-    currentStage = response.state.currentStage;
     attachListeners();
-    injectBadge(currentStage);
+    injectBadge();
   }
 });
