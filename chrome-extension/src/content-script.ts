@@ -70,7 +70,7 @@ function findChangedInputs(
 ): Array<{ el: HTMLInputElement | HTMLTextAreaElement; newValue: string }> {
   const changed: Array<{ el: HTMLInputElement | HTMLTextAreaElement; newValue: string }> = [];
   before.forEach((oldVal, el) => {
-    if (el.value !== oldVal && el.value.trim() !== '') {
+    if (el.value !== oldVal && el.value.trim() !== '' && (el as HTMLInputElement).type !== 'password') {
       changed.push({ el, newValue: el.value });
     }
   });
@@ -121,6 +121,9 @@ function onClickCapture(e: MouseEvent): void {
 function onInputCapture(e: Event): void {
   if (!isRecording) return;
   const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+
+  // Never record password field values
+  if ((target as HTMLInputElement).type === 'password') return;
 
   const existing = inputTimers.get(target);
   if (existing) clearTimeout(existing);
