@@ -3,7 +3,7 @@
   "name": "Test Recorder",
   "version": "1.0.0",
   "description": "Records user interactions with semantic context for LLM-friendly bug reporting.",
-  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
